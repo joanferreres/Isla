@@ -3,12 +3,24 @@ set -euo pipefail
 project_root="$(cd "$(dirname "$0")/.." && pwd)"
 output_root="${ISLA_OUTPUT_ROOT:-$project_root/outputs}"
 build_root="${ISLA_BUILD_ROOT:-${TMPDIR:-/tmp}/isla-swift-build}"
-swift build --scratch-path "$build_root/main" --build-system native --package-path "$project_root" -c release --arch arm64
-swift build --scratch-path "$build_root/adapter" --build-system native --package-path "$project_root/Vendor/MediaRemoteAdapter" -c release --arch arm64
-adapter_binary_root="$(swift build --scratch-path "$build_root/adapter" --build-system native --package-path "$project_root/Vendor/MediaRemoteAdapter" -c release --arch arm64 --show-bin-path)"
-binary_root="$(swift build --scratch-path "$build_root/main" --build-system native --package-path "$project_root" -c release --arch arm64 --show-bin-path)"
+source_root="$(mktemp -d /tmp/isla-source.XXXXXX)"
 stage_root="$(mktemp -d /tmp/isla-package.XXXXXX)"
-trap 'rm -rf "$stage_root"' EXIT
+trap 'rm -rf "$source_root" "$stage_root"' EXIT
+# Compile a local source snapshot: cloud sync can change input metadata mid-build.
+python3 - "$project_root" "$source_root" <<'PYTHON'
+from pathlib import Path
+import shutil
+import sys
+source, snapshot = map(Path, sys.argv[1:])
+shutil.copy2(source / 'Package.swift', snapshot / 'Package.swift')
+for directory in ('Sources', 'Vendor'):
+    shutil.copytree(source / directory, snapshot / directory,
+                    ignore=shutil.ignore_patterns('.build', '.swiftpm', '.git', '.DS_Store'))
+PYTHON
+swift build --scratch-path "$build_root/main" --build-system native --package-path "$source_root" -c release --arch arm64
+swift build --scratch-path "$build_root/adapter" --build-system native --package-path "$source_root/Vendor/MediaRemoteAdapter" -c release --arch arm64
+adapter_binary_root="$(swift build --scratch-path "$build_root/adapter" --build-system native --package-path "$source_root/Vendor/MediaRemoteAdapter" -c release --arch arm64 --show-bin-path)"
+binary_root="$(swift build --scratch-path "$build_root/main" --build-system native --package-path "$source_root" -c release --arch arm64 --show-bin-path)"
 app_path="$stage_root/Isla.app"
 mkdir -p "$output_root" "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
 cp "$binary_root/Isla" "$app_path/Contents/MacOS/Isla"
