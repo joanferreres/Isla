@@ -13,7 +13,7 @@ import shutil
 import sys
 source, snapshot = map(Path, sys.argv[1:])
 shutil.copy2(source / 'Package.swift', snapshot / 'Package.swift')
-for directory in ('Sources', 'Vendor'):
+for directory in ('Sources', 'Tests', 'Vendor'):
     shutil.copytree(source / directory, snapshot / directory,
                     ignore=shutil.ignore_patterns('.build', '.swiftpm', '.git', '.DS_Store'))
 PYTHON
