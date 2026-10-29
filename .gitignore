@@ -1,0 +1,12 @@
+.build/
+.swiftpm/
+outputs/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.pem
+*.keychain-db
+__pycache__/

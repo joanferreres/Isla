@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>local.personal.isla</string>
+<key>CFBundleExecutable</key><string>Isla</string>
+<key>CFBundleIconFile</key><string>Isla</string>
+<key>CFBundleName</key><string>Isla</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>0.8.7</string>
+<key>CFBundleVersion</key><string>37</string>
+<key>LSUIElement</key><true/>
+<key>LSMinimumSystemVersion</key><string>15.0</string>
+<key>NSHighResolutionCapable</key><true/>
+<key>NSAppleEventsUsageDescription</key><string>Isla muestra la carátula y permite controlar la reproducción de Apple Music.</string>
+<key>NSCalendarsFullAccessUsageDescription</key><string>Isla muestra tus eventos y próximos compromisos. No modifica el calendario.</string>
+</dict></plist>
