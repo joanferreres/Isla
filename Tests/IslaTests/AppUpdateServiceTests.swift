@@ -76,6 +76,19 @@ private actor ReleaseServer {
  let requests=await server.recorded()
  XCTAssertNil(requests[0].value(forHTTPHeaderField:"If-None-Match"));XCTAssertNotNil(service.available)
  }
+ func testWeeklyChecksWaitSevenDaysAndManualCheckCanRunEarlier() async {
+ let defaults=isolatedDefaults(),server=ReleaseServer()
+ let service=AppUpdateService(currentVersion:"0.8.8",defaults:defaults,fetch:{try await server.load($0)})
+ defaults.set(Date().addingTimeInterval(-6*24*60*60),forKey:"updates.lastAttempt")
+ service.start();await service.check()
+ var requests=await server.recorded();XCTAssertTrue(requests.isEmpty)
+ await service.check(force:true)
+ requests=await server.recorded();XCTAssertEqual(requests.count,1)
+ defaults.set(Date().addingTimeInterval(-8*24*60*60),forKey:"updates.lastAttempt")
+ await service.check()
+ requests=await server.recorded();XCTAssertEqual(requests.count,2)
+ service.suspend()
+ }
  func testSleepDiscardsResultOfAnInFlightCheck() async throws {
  let defaults=isolatedDefaults(),server=ReleaseServer(delay:.milliseconds(100))
  let service=AppUpdateService(currentVersion:"0.8.8",defaults:defaults,fetch:{try await server.load($0)})

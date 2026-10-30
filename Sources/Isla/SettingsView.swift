@@ -65,7 +65,7 @@ private enum SettingsPage:String,CaseIterable,Identifiable {
  HStack { Label("Isla \(update.version) disponible",systemImage:"arrow.down.circle.fill").foregroundStyle(.green);Spacer();Button("Descargar",action:updates.openDownload) }
  } else if let error=updates.error { Text(error).font(.caption).foregroundStyle(.orange) }
  else if let checked=updates.lastChecked { Text("Última comprobación: \(checked.formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary) }
- Text("Consulta las versiones publicadas en GitHub una vez al día. Te avisa sin instalar nada automáticamente.").font(.caption).foregroundStyle(.secondary)
+ Text("Consulta las versiones publicadas en GitHub una vez por semana. Te avisa sin instalar nada automáticamente.").font(.caption).foregroundStyle(.secondary)
  } header: { Label("Actualizaciones",systemImage:"arrow.triangle.2.circlepath") }
  }
  }

@@ -50,7 +50,7 @@ Requiere un sensor compatible y el permiso de Grabación de pantalla. Algunos mo
 
 ## Validación pendiente
 
-La versión 0.8.8 pasa 119 pruebas automatizadas y su ZIP tiene firma válida al extraerlo en el Mac de desarrollo. Sigue pendiente confirmar el recorrido de los clics físicos en otros equipos y diagnosticar el fallo de apertura comunicado en un MacBook M4. No se presenta la distribución por GitHub como una solución ya comprobada a ese error.
+La versión 0.8.9 pasa 120 pruebas automatizadas y su ZIP tiene firma válida al extraerlo en el Mac de desarrollo. Sigue pendiente confirmar el recorrido de los clics físicos en otros equipos y diagnosticar el fallo de apertura comunicado en un MacBook M4. No se presenta la distribución por GitHub como una solución ya comprobada a ese error.
 
 ## No aparece el aviso de actualización
 

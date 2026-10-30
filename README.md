@@ -32,7 +32,7 @@ Si el repositorio es privado, el propietario debe invitar a su amigo como colabo
 - Aviso al terminar tareas de Codex y tres modos: sonido y aviso visual, solo visual o sin avisos.
 - Bandeja de archivos con miniaturas y opciones de compartir y AirDrop.
 - Selección de pantallas y efecto opcional al mover la tapa.
-- Aviso de nuevas versiones publicadas en GitHub, con comprobación diaria y opción manual.
+- Aviso de nuevas versiones publicadas en GitHub, con comprobación semanal y opción manual.
 
 ## Primer uso y privacidad
 
@@ -40,17 +40,17 @@ Cada persona configura sus propias cuentas y permisos. El paquete no contiene ca
 
 ## Estado del proyecto
 
-Versión actual: **0.8.8**. Hay 119 pruebas automatizadas, pero estas no sustituyen la comprobación en otros Macs. Los clics dentro del notch físico requieren validación con entrada física en el equipo de destino. El mensaje de apertura recibido en el Mac de un amigo sigue pendiente de diagnóstico.
+Versión actual: **0.8.9**. Hay 120 pruebas automatizadas, pero estas no sustituyen la comprobación en otros Macs. Los clics dentro del notch físico requieren validación con entrada física en el equipo de destino. El mensaje de apertura recibido en el Mac de un amigo sigue pendiente de diagnóstico.
 
 Las integraciones multimedia, el sensor de tapa y algunos datos de IA usan interfaces que pueden cambiar entre versiones. Las consultas de límites no representan una garantía de crédito disponible.
 
 ## Actualizaciones
 
-Desde **Isla 0.8.8**, la app consulta las releases de este repositorio una vez al día. Si hay una versión estable superior con el archivo `Isla.zip`, muestra un aviso con **Descargar actualización** y **Más tarde**, además de un indicador en el icono de la barra de menús. No instala ni sustituye archivos sin intervención del usuario.
+Desde **Isla 0.8.9**, la app consulta las releases de este repositorio una vez por semana. La versión 0.8.8 hacía una comprobación diaria. Si hay una versión estable superior con el archivo `Isla.zip`, muestra un aviso con **Descargar actualización** y **Más tarde**, además de un indicador en el icono de la barra de menús. No instala ni sustituye archivos sin intervención del usuario.
 
 La opción **Buscar actualizaciones…** está en el menú de Isla y en **Ajustes → General → Actualizaciones**. Puedes desactivar la consulta automática. No necesita cuentas de GitHub ni permisos de notificaciones. El modo luna sin avisos evita el diálogo automático; la actualización sigue accesible en el menú y en Ajustes.
 
-**Quienes tengan 0.8.7 o anterior deben instalar 0.8.8 manualmente una vez** para incorporar esta función. Subir cambios a `main` no genera una actualización: hay que aumentar la versión, compilar y publicar una nueva release con `Isla.zip`. Consulta [el procedimiento](docs/COMPILAR.md#publicar-una-nueva-versión).
+**Quienes tengan 0.8.7 o anterior deben instalar la versión actual manualmente una vez** para incorporar esta función. Subir cambios a `main` no genera una actualización: hay que aumentar la versión, compilar y publicar una nueva release con `Isla.zip`. Consulta [el procedimiento](docs/COMPILAR.md#publicar-una-nueva-versión).
 
 ## Desarrollo y créditos
 

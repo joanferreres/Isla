@@ -36,9 +36,9 @@ Abre Isla desde su icono de la barra de menús y entra en **Ajustes**. En la isl
 
 ## Actualizar
 
-A partir de 0.8.8, Isla comprueba GitHub una vez al día y avisa de nuevas versiones estables publicadas con un ZIP. El aviso aparece una sola vez por versión: **Más tarde** lo cierra, pero conserva el acceso a la descarga desde el menú y Ajustes. **Buscar actualizaciones…** fuerza una consulta manual. El modo luna sin avisos evita el diálogo automático, sin ocultar la disponibilidad en Ajustes o el menú.
+A partir de 0.8.9, Isla comprueba GitHub una vez por semana (0.8.8 lo hacía a diario) y avisa de nuevas versiones estables publicadas con un ZIP. El aviso aparece una sola vez por versión: **Más tarde** lo cierra, pero conserva el acceso a la descarga desde el menú y Ajustes. **Buscar actualizaciones…** fuerza una consulta manual. El modo luna sin avisos evita el diálogo automático, sin ocultar la disponibilidad en Ajustes o el menú.
 
-Puedes desactivar **Avisarme de nuevas versiones** en **Ajustes → General → Actualizaciones**. Solo se consulta información pública de las releases, sin enviar sesiones de IA ni credenciales. Las descargas se abren en GitHub y la instalación sigue siendo manual. Las versiones 0.8.7 y anteriores necesitan instalar 0.8.8 una vez para recibir los avisos futuros.
+Puedes desactivar **Avisarme de nuevas versiones** en **Ajustes → General → Actualizaciones**. Solo se consulta información pública de las releases, sin enviar sesiones de IA ni credenciales. Las descargas se abren en GitHub y la instalación sigue siendo manual. Las versiones 0.8.7 y anteriores necesitan instalar la versión actual una vez para recibir los avisos futuros.
 
 
 Sal de Isla desde su menú antes de sustituir la aplicación. Descarga el nuevo ZIP, descomprímelo y reemplaza la copia de Aplicaciones. Los datos y ajustes son propios de cada usuario. Cambiar de identidad de firma, por ejemplo al pasar a una compilación propia, puede hacer que macOS vuelva a solicitar permisos.

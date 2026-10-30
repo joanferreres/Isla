@@ -4,7 +4,7 @@ import IslandCore
 
 @MainActor final class AppUpdateService:ObservableObject {
  typealias Fetch = @Sendable (URLRequest) async throws -> (Data,HTTPURLResponse)
- static let interval:TimeInterval=24*60*60
+ static let interval:TimeInterval=7*24*60*60
  static let endpoint=URL(string:"https://api.github.com/repos/joanferreres/Isla/releases/latest")!
  let currentVersion:String
  @Published private(set) var available:AppUpdate?
