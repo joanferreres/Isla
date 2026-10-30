@@ -2,7 +2,7 @@
 
 <img src="Resources/Isla-icon.png" width="96" alt="Icono de Isla">
 
-Una isla dinámica para el notch del Mac, hecha con SwiftUI y AppKit. Proyecto personal y experimental, inspirado en NotchNook y CodeNotch.
+Una isla dinámica para el notch del Mac, hecha con SwiftUI y AppKit. Proyecto personal y experimental.
 
 **[Descargar Isla.zip](https://github.com/joanferreres/Isla/releases/latest/download/Isla.zip)** · **[Manual de instalación](docs/INSTALACION.md)** · **[Solución de problemas](docs/PROBLEMAS.md)** · **[Compilar desde el código](docs/COMPILAR.md)**
 
