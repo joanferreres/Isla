@@ -12,6 +12,7 @@ private enum SettingsPage:String,CaseIterable,Identifiable {
  @ObservedObject var activity:CodexActivityService
  @ObservedObject var screenshots:ScreenshotService
  @ObservedObject var lid:LidEffectController
+ @ObservedObject var updates:AppUpdateService
  @ObservedObject var store:PreferencesStore
  @State private var page=SettingsPage.general
  var body:some View {
@@ -38,7 +39,7 @@ private enum SettingsPage:String,CaseIterable,Identifiable {
  case .effects: effects
  }
  }.formStyle(.grouped).scrollContentBackground(.hidden)
- HStack { Text("Isla 0.8.7");Spacer();Text("Los cambios se guardan automáticamente") }.font(.caption2).foregroundStyle(.secondary).padding(.horizontal,24).padding(.vertical,12)
+ HStack { Text("Isla \(updates.currentVersion)");Spacer();Text("Los cambios se guardan automáticamente") }.font(.caption2).foregroundStyle(.secondary).padding(.horizontal,24).padding(.vertical,12)
  }.frame(width:640,height:480).background(Color(nsColor:.windowBackgroundColor))
  }
  private var general:some View {
@@ -53,6 +54,19 @@ private enum SettingsPage:String,CaseIterable,Identifiable {
  Slider(value:$store.value.expandedWidth,in:480...800,step:20).accessibilityLabel("Ancho del panel")
  Text("Panel compacto adaptado al contenido, con controles debajo del notch. Ajusta el ancho para dar más espacio a música y calendario.").font(.caption).foregroundStyle(.secondary)
  } header: { Label("Apariencia",systemImage:"rectangle.compress.vertical") }
+ Section {
+ Toggle("Avisarme de nuevas versiones",isOn:$updates.automaticChecksEnabled)
+ HStack {
+ Text("Versión \(updates.currentVersion)")
+ Spacer()
+ Button(updates.checking ? "Comprobando…" : "Buscar actualizaciones") { Task { await updates.check(force:true) } }.disabled(updates.checking)
+ }
+ if let update=updates.available {
+ HStack { Label("Isla \(update.version) disponible",systemImage:"arrow.down.circle.fill").foregroundStyle(.green);Spacer();Button("Descargar",action:updates.openDownload) }
+ } else if let error=updates.error { Text(error).font(.caption).foregroundStyle(.orange) }
+ else if let checked=updates.lastChecked { Text("Última comprobación: \(checked.formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary) }
+ Text("Consulta las versiones publicadas en GitHub una vez al día. Te avisa sin instalar nada automáticamente.").font(.caption).foregroundStyle(.secondary)
+ } header: { Label("Actualizaciones",systemImage:"arrow.triangle.2.circlepath") }
  }
  }
  private var modules:some View {

@@ -50,4 +50,13 @@ Requiere un sensor compatible y el permiso de Grabación de pantalla. Algunos mo
 
 ## Validación pendiente
 
-La versión 0.8.7 pasa 111 pruebas automatizadas y su ZIP tiene firma válida al extraerlo en el Mac de desarrollo. Sigue pendiente confirmar el recorrido de los clics físicos en otros equipos y diagnosticar el fallo de apertura comunicado en un MacBook M4. No se presenta la distribución por GitHub como una solución ya comprobada a ese error.
+La versión 0.8.8 pasa 119 pruebas automatizadas y su ZIP tiene firma válida al extraerlo en el Mac de desarrollo. Sigue pendiente confirmar el recorrido de los clics físicos en otros equipos y diagnosticar el fallo de apertura comunicado en un MacBook M4. No se presenta la distribución por GitHub como una solución ya comprobada a ese error.
+
+## No aparece el aviso de actualización
+
+- La versión instalada debe ser 0.8.8 o posterior. Las anteriores no tienen comprobador: instala la nueva una vez desde Releases.
+- Comprueba **Ajustes → General → Actualizaciones → Avisarme de nuevas versiones** y prueba **Buscar actualizaciones**.
+- El aviso automático no se repite si ya pulsaste **Más tarde** para esa versión; puedes descargarla desde Ajustes o el menú.
+- El modo luna sin avisos suprime el diálogo automático. La disponibilidad sigue mostrándose en Ajustes y el menú.
+- Una nueva versión debe publicarse como release estable con una etiqueta superior y un archivo **Isla.zip**. Un commit nuevo, una prerelease o un borrador no bastan.
+- Sin conexión o con límites de GitHub, la consulta automática no interrumpe el trabajo; reintenta manualmente cuando vuelvas a tener acceso.

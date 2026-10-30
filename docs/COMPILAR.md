@@ -68,7 +68,15 @@ cd outputs
 shasum -a 256 Isla.zip > SHA256SUMS.txt
 ```
 
-5. Guarda el código en un commit y crea en GitHub una release con la etiqueta correspondiente, por ejemplo `v0.8.8`, vinculada a ese commit.
+5. Guarda el código en un commit y crea en GitHub una release con la etiqueta correspondiente, por ejemplo `v0.8.9`, vinculada a ese commit.
 6. Adjunta **Isla.zip** y **SHA256SUMS.txt**. Describe novedades, requisitos, firma sin notarización y cualquier comprobación pendiente. No incluyas cuentas, calendarios, sesiones, llaveros ni archivos privados de firma.
 
 El enlace de descarga del README apunta al archivo `Isla.zip` de la última release normal. Una release marcada como prerelease puede no aparecer en ese enlace; en ese caso enlázala expresamente.
+
+## Qué hace que aparezca el aviso
+
+El comprobador de Isla 0.8.8 y posteriores consulta `https://api.github.com/repos/joanferreres/Isla/releases/latest`. Solo ofrece una versión superior a la instalada, con etiqueta numérica como `v0.8.9`, release normal publicada y un archivo adjunto llamado exactamente **Isla.zip**. Las etiquetas sin release, borradores, prereleases y commits nuevos en `main` no activan el aviso.
+
+La versión de `Info.plist`, la etiqueta y la aplicación dentro del ZIP deben coincidir. No reutilices una etiqueta existente para cambiar el binario. Publica una versión nueva. El acceso de escritura al repositorio determina quién puede publicar estas versiones.
+
+La consulta automática se hace como máximo una vez al día, con una petición condicional cuando hay caché. No hay descargas automáticas ni un proceso de actualización adicional. Se suspende al dormir el Mac y puede desactivarse; la comprobación manual sigue funcionando.
