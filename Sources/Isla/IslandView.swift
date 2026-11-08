@@ -10,6 +10,7 @@ import IslandCore
  @ObservedObject var activity:CodexActivityService
  @ObservedObject var usage:CodexUsageService
  @ObservedObject var statistics:StatisticsStore
+ let showRecordPlayer:() -> Void
  let settings:() -> Void
  @State private var section="Inicio"
  @State private var selectedAI="Codex"
@@ -36,6 +37,9 @@ import IslandCore
  .accessibilityLabel("Modo luna · avisos")
  .accessibilityValue(preferences.value.aiNotificationMode.title)
  .help(preferences.value.aiNotificationMode.title+" · Cambiar a "+preferences.value.aiNotificationMode.next.title)
+ Button(action:showRecordPlayer) { Image(systemName:"record.circle").frame(width:24,height:28) }
+ .accessibilityLabel("Abrir tocadiscos")
+ .help("Abrir tocadiscos")
  Button { model.toggle() } label: { Image(systemName:model.state.pinned ? "pin.fill" : "pin").frame(width:24,height:28) }.accessibilityLabel("Fijar")
  Button(action:settings) { Image(systemName:"gearshape").frame(width:24,height:28) }.accessibilityLabel("Ajustes")
  Button { model.close() } label: { Image(systemName:"xmark").frame(width:24,height:28) }.accessibilityLabel("Cerrar")

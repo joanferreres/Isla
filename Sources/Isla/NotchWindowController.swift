@@ -71,13 +71,13 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  private var mediaPlaying=false
  private let openSettings:() -> Void
  var subscriptions=Set<AnyCancellable>()
- init(screen:NSScreen,preferences:PreferencesStore,local:LocalStore,music:AppleMusicService,calendar:CalendarService,activity:CodexActivityService,usage:CodexUsageService,statistics:StatisticsStore,settings:@escaping () -> Void) {
+ init(screen:NSScreen,preferences:PreferencesStore,local:LocalStore,music:AppleMusicService,calendar:CalendarService,activity:CodexActivityService,usage:CodexUsageService,statistics:StatisticsStore,showRecordPlayer:@escaping () -> Void,settings:@escaping () -> Void) {
  self.preferences=preferences;self.openSettings=settings; displayID=(screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
  panel=IslandPanel(contentRect:.zero,styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
  panel.onEscape={ [weak model] in model?.close() }; panel.isOpaque=false; panel.backgroundColor = .clear; panel.hasShadow=false;panel.acceptsMouseMovedEvents=true
  // Keep the system menu bar and Control Center above the island.
  panel.level = NSWindow.Level(rawValue:NSWindow.Level.mainMenu.rawValue-1); panel.hidesOnDeactivate=false; panel.collectionBehavior=[.canJoinAllSpaces,.canJoinAllApplications,.fullScreenAuxiliary,.stationary]; panel.isMovable=false
- panel.contentView=IslandHostingView(rootView:IslandView(model:model,preferences:preferences,local:local,music:music,calendar:calendar,activity:activity,usage:usage,statistics:statistics,settings:settings))
+ panel.contentView=IslandHostingView(rootView:IslandView(model:model,preferences:preferences,local:local,music:music,calendar:calendar,activity:activity,usage:usage,statistics:statistics,showRecordPlayer:showRecordPlayer,settings:settings))
  preferences.$value.map{$0.normalized().expandedWidth}.removeDuplicates().dropFirst().sink { [weak self] _ in DispatchQueue.main.async { self?.refreshGeometry() } }.store(in:&subscriptions)
  if let monitor=NSEvent.addGlobalMonitorForEvents(matching:[.mouseMoved,.leftMouseDragged,.rightMouseDragged,.leftMouseDown,.rightMouseDown]) { [weak self] event in
  guard let self else { return };self.updatePointer()

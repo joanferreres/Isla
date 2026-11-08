@@ -2,7 +2,6 @@ import AppKit
 import SwiftUI
 import Combine
 import IslandCore
-import IslandCore
 @MainActor final class AppCoordinator: NSObject, NSApplicationDelegate {
  let preferences = PreferencesStore()
  let local = LocalStore()
@@ -11,6 +10,7 @@ import IslandCore
  let usage = CodexUsageService()
  let statistics = StatisticsStore()
  let updates = AppUpdateService()
+ private lazy var recordPlayer = RecordPlayerWindow(music: music, preferences: preferences)
  private var updateMenuItem:NSMenuItem?
  private var checkUpdateMenuItem:NSMenuItem?
  lazy var screenshots=ScreenshotService(onCapture:{ _ in })
@@ -28,7 +28,7 @@ import IslandCore
  }
  activity.onCompletion = { [weak self] event in self?.statistics.record(event) }
  usage.onSnapshot = { [weak self] snapshot in self?.statistics.record(snapshot) }
- displays = DisplayCoordinator(preferences: preferences, local: local, music: music, calendar: calendar, activity: activity, usage: usage, statistics: statistics, settings: { [weak self] in self?.showSettings() })
+ displays = DisplayCoordinator(preferences: preferences, local: local, music: music, calendar: calendar, activity: activity, usage: usage, statistics: statistics, showRecordPlayer: { [weak self] in self?.openRecordPlayer() }, settings: { [weak self] in self?.showSettings() })
  displays?.reconcile()
  local.$loaded.filter{$0}.first().sink { [weak self] _ in
  guard let self else { return }
@@ -71,14 +71,14 @@ import IslandCore
  status?.button?.setAccessibilityLabel("Isla")
  status?.button?.toolTip="Isla"
  let menu = NSMenu()
- for (title, action) in [("Abrir Isla", #selector(openIsland)), ("Ajustes…", #selector(openSettings)), ("Salir", #selector(quit))] {
+ for (title, action) in [("Abrir Isla", #selector(openIsland)), ("Tocadiscos…", #selector(openRecordPlayer)), ("Ajustes…", #selector(openSettings)), ("Salir", #selector(quit))] {
  let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; menu.addItem(item)
  }
  updateMenuItem=NSMenuItem(title:"",action:#selector(downloadUpdate),keyEquivalent:"")
  updateMenuItem?.target=self;updateMenuItem?.isHidden=true
- menu.insertItem(updateMenuItem!,at:2)
+ menu.insertItem(updateMenuItem!,at:menu.items.count-1)
  checkUpdateMenuItem=NSMenuItem(title:"Buscar actualizaciones…",action:#selector(checkForUpdates),keyEquivalent:"")
- checkUpdateMenuItem?.target=self;menu.insertItem(checkUpdateMenuItem!,at:3)
+ checkUpdateMenuItem?.target=self;menu.insertItem(checkUpdateMenuItem!,at:menu.items.count-1)
  status?.menu = menu
  updates.onAvailable={ [weak self] in
  guard let self,self.preferences.value.aiVisualEnabled,NSApp.modalWindow == nil,
@@ -146,6 +146,7 @@ import IslandCore
  if alert.runModal() == .alertFirstButtonReturn { updates.openDownload() }
  }
  @objc func openIsland() { displays?.open() }
+ @objc func openRecordPlayer() { recordPlayer.show() }
  @objc func openSettings() { showSettings() }
  @objc func quit() { NSApp.terminate(nil) }
  func showSettings() {
