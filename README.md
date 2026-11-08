@@ -41,7 +41,7 @@ Cada persona configura sus propias cuentas y permisos. El paquete no contiene ca
 
 ## Estado del proyecto
 
-Versión actual: **0.8.21**. Hay 123 pruebas automatizadas, pero estas no sustituyen la comprobación en otros Macs. Los clics dentro del notch físico requieren validación con entrada física en el equipo de destino. El mensaje de apertura recibido en el Mac de un amigo sigue pendiente de diagnóstico.
+Versión actual: **0.8.22**. Hay 123 pruebas automatizadas, pero estas no sustituyen la comprobación en otros Macs. Los clics dentro del notch físico requieren validación con entrada física en el equipo de destino. El mensaje de apertura recibido en el Mac de un amigo sigue pendiente de diagnóstico.
 
 Las integraciones multimedia, el sensor de tapa y algunos datos de IA usan interfaces que pueden cambiar entre versiones. Las consultas de límites no representan una garantía de crédito disponible.
 

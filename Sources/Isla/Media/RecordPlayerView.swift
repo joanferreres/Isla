@@ -2,19 +2,34 @@ import SwiftUI
 import IslandCore
 
 enum RecordPlayerPalette: String, CaseIterable, Identifiable {
-    case blue, amber
+    case blue, amber, emerald, lilac, ruby, silver
 
     var id: Self { self }
-    var title: String { self == .blue ? "Azul" : "Ámbar" }
-    var shortcut: String { self == .blue ? "1" : "2" }
-    var background: NSColor {
-        self == .blue ? NSColor(srgbRed: 0.045, green: 0.061, blue: 0.091, alpha: 1)
-            : NSColor(srgbRed: 0.092, green: 0.061, blue: 0.043, alpha: 1)
+
+    private var style: (title: String, shortcut: String, background: UInt32, accent: UInt32, ink: UInt32, vinyl: UInt32, metal: UInt32) {
+        switch self {
+        case .blue:    ("Azul",      "1", 0x0B1017, 0x7AB0FF, 0xEBF2FF, 0x0E1117, 0xA1B8D6)
+        case .amber:   ("Ámbar",     "2", 0x170F0B, 0xFAB563, 0xFFF0DB, 0x1A110D, 0xC7A87D)
+        case .emerald: ("Esmeralda", "3", 0x0B1915, 0x72E2B3, 0xE1FFF2, 0x10231E, 0x90C2AB)
+        case .lilac:   ("Lavanda",   "4", 0x171021, 0xC4ACFF, 0xF4EBFF, 0x1E172B, 0xBBAACE)
+        case .ruby:    ("Rubí",      "5", 0x1E0D15, 0xFF8EA9, 0xFFEDF1, 0x2C1420, 0xD5A2AE)
+        case .silver:  ("Plata",     "6", 0x141619, 0xD9E1EE, 0xF1F4F8, 0x22252A, 0xBDC6D3)
+        }
     }
-    var accent: Color { self == .blue ? Color(red: 0.48, green: 0.69, blue: 1) : Color(red: 0.98, green: 0.71, blue: 0.39) }
-    var ink: Color { self == .blue ? Color(red: 0.92, green: 0.95, blue: 1) : Color(red: 1, green: 0.94, blue: 0.86) }
-    var vinyl: Color { self == .blue ? Color(red: 0.055, green: 0.067, blue: 0.09) : Color(red: 0.10, green: 0.067, blue: 0.051) }
-    var metal: Color { self == .blue ? Color(red: 0.63, green: 0.72, blue: 0.84) : Color(red: 0.78, green: 0.66, blue: 0.49) }
+
+    var title: String { style.title }
+    var shortcut: String { style.shortcut }
+    var background: NSColor { color(style.background) }
+    var accent: Color { Color(nsColor: color(style.accent)) }
+    var ink: Color { Color(nsColor: color(style.ink)) }
+    var vinyl: Color { Color(nsColor: color(style.vinyl)) }
+    var metal: Color { Color(nsColor: color(style.metal)) }
+
+    private func color(_ rgb: UInt32) -> NSColor {
+        NSColor(srgbRed: Double((rgb >> 16) & 0xFF) / 255,
+                green: Double((rgb >> 8) & 0xFF) / 255,
+                blue: Double(rgb & 0xFF) / 255, alpha: 1)
+    }
 }
 
 @MainActor struct RecordPlayerView: View {
@@ -24,6 +39,7 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var artwork: NSImage?
+    @State private var showsAmbiences = false
     @State private var pendingCue: PendingCue?
 
     private struct PendingCue: Equatable {
@@ -217,25 +233,61 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     }
 
     private var paletteSelector: some View {
-        HStack(spacing: 6) {
-            ForEach(RecordPlayerPalette.allCases) { item in
-                playerButton(tint: item == palette ? item.accent : nil) {
-                    presentation.select(item)
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: item == palette ? "checkmark" : "circle.fill")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(item == palette ? Color.primary : item.accent)
-                            .frame(width: 9)
-                        Text("⌘\(item.shortcut)").font(.caption.monospacedDigit())
+        playerButton {
+            showsAmbiences = true
+        } label: {
+            Image(systemName: "command")
+        }
+        .accessibilityLabel("Elegir ambiente")
+        .help("Mantén pulsado para ver los ambientes")
+        .simultaneousGesture(LongPressGesture(minimumDuration: 0.35).onEnded { _ in
+            showsAmbiences = true
+        })
+        .popover(isPresented: $showsAmbiences, arrowEdge: .top) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Ambientes").font(.headline).accessibilityAddTraits(.isHeader)
+                LazyVGrid(columns: [GridItem(.fixed(134)), GridItem(.fixed(134))], spacing: 8) {
+                    ForEach(RecordPlayerPalette.allCases) { item in
+                        ambienceButton(item)
                     }
                 }
-                .accessibilityLabel("Ambiente \(item.title)")
-                .accessibilityAddTraits(item == palette ? .isSelected : [])
-                .help("Ambiente \(item.title) · ⌘\(item.shortcut)")
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(14)
+            .onChange(of: palette) { _, _ in showsAmbiences = false }
+        }
+        .onChange(of: presentation.isVisible) { _, visible in
+            if !visible { showsAmbiences = false }
+        }
+    }
+
+    private func ambienceButton(_ item: RecordPlayerPalette) -> some View {
+        let selected = item == palette
+        return playerButton(tint: selected ? item.accent : nil) {
+            presentation.select(item)
+            showsAmbiences = false
+        } label: {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(item.vinyl)
+                    .strokeBorder(item.metal, lineWidth: 1)
+                    .overlay(Circle().fill(item.accent).frame(width: 8, height: 8))
+                    .frame(width: 22, height: 22)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(item.title).font(.callout.weight(.medium))
+                    Text("⌘\(item.shortcut)").font(.caption.monospacedDigit())
+                        .foregroundStyle(selected ? .primary : .secondary)
+                }
+                Spacer(minLength: 0)
+                if selected {
+                    Image(systemName: "checkmark").font(.caption.weight(.semibold))
+                }
             }
         }
-        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityLabel(item.title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .keyboardShortcut(KeyEquivalent(Character(item.shortcut)), modifiers: .command)
     }
 
     @ViewBuilder private func playbackMaterial<Content: View>(_ content: Content) -> some View {
