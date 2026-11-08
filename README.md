@@ -25,7 +25,7 @@ Si el repositorio es privado, el propietario debe invitar a su amigo como colabo
 
 ## Qué incluye
 
-- Hover para resaltar la isla y clic para abrirla; menú secundario con ajustes, fijar y salir.
+- Clic para abrir la isla, con apertura opcional al pasar el cursor; menú secundario con ajustes, fijar y salir.
 - Carátula y controles de Apple Music, y metadatos multimedia compatibles.
 - Calendario, agenda y recordatorio del siguiente evento durante los diez minutos anteriores.
 - Información de uso de Codex, Cursor y Claude cuando la integración y la sesión lo permiten. Los límites mostrados dependen de los datos que facilite cada servicio.
@@ -40,7 +40,7 @@ Cada persona configura sus propias cuentas y permisos. El paquete no contiene ca
 
 ## Estado del proyecto
 
-Versión actual: **0.8.10**. Hay 120 pruebas automatizadas, pero estas no sustituyen la comprobación en otros Macs. Los clics dentro del notch físico requieren validación con entrada física en el equipo de destino. El mensaje de apertura recibido en el Mac de un amigo sigue pendiente de diagnóstico.
+Versión actual: **0.8.11**. Hay 120 pruebas automatizadas, pero estas no sustituyen la comprobación en otros Macs. Los clics dentro del notch físico requieren validación con entrada física en el equipo de destino. El mensaje de apertura recibido en el Mac de un amigo sigue pendiente de diagnóstico.
 
 Las integraciones multimedia, el sensor de tapa y algunos datos de IA usan interfaces que pueden cambiar entre versiones. Las consultas de límites no representan una garantía de crédito disponible.
 

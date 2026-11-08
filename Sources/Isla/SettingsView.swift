@@ -45,9 +45,8 @@ private enum SettingsPage:String,CaseIterable,Identifiable {
  private var general:some View {
  Group {
  Section {
- Toggle("Realzar al pasar el cursor",isOn:$store.value.hoverEnabled)
  Toggle("Abrir también al pasar el cursor",isOn:$store.value.openOnHover)
- Text("Al pasar el cursor la isla se realza suavemente. Pulsa para abrirla.").font(.caption).foregroundStyle(.secondary)
+ Text("Con esta opción desactivada, pulsa la isla para abrirla.").font(.caption).foregroundStyle(.secondary)
  } header: { Label("Interacción",systemImage:"cursorarrow") }
  Section {
  HStack { Text("Ancho del panel");Spacer();Text("\(Int(store.value.expandedWidth)) pt").monospacedDigit().foregroundStyle(.secondary) }

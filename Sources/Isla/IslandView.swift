@@ -70,9 +70,6 @@ import IslandCore
  .overlay {
  CompletionRailView(trigger:activity.completionPulse,enabled:preferences.value.aiVisualEnabled,reduceMotion:reduced,cornerRadius:expanded ? 24 : 12,notchWidth:model.notchWidth,notchHeight:model.headerHeight,physicalNotch:model.hasPhysicalNotch)
  }
- .overlay { if model.hovered && !expanded { UnevenRoundedRectangle(bottomLeadingRadius:12,bottomTrailingRadius:12).stroke(.white.opacity(0.16),lineWidth:1).allowsHitTesting(false) } }
- .scaleEffect(x:model.hovered && !expanded ? 1.035 : 1,y:model.hovered && !expanded ? 1.10 : 1,anchor:.top)
- .animation(reduced ? nil : .spring(response:0.28,dampingFraction:0.75),value:model.hovered)
  .shadow(color:.black.opacity(expanded ? 0.3 : 0),radius:12,y:6)
  .animation(reduced ? .easeOut(duration:0.15) : .spring(response:0.35,dampingFraction:0.9),value:model.compactSize)
  .animation(reduced ? .easeOut(duration:0.15) : .spring(response:expanded ? 0.38 : 0.32,dampingFraction:expanded ? 0.8 : 0.9),value:expanded)

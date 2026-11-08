@@ -4,7 +4,6 @@ import Combine
 import IslandCore
 @MainActor final class IslandModel: ObservableObject {
  @Published var state = IslandState()
- @Published var hovered=false
  @Published var trayMode=false
  @Published var headerHeight: CGFloat = 32
  @Published var notchWidth: CGFloat = 196
@@ -16,8 +15,8 @@ import IslandCore
  var pointerInside = false
  private var interactionHolds = 0
  private var pending: Task<Void, Never>?
- func updateHover(_ inside:Bool,enabled:Bool,openOnHover:Bool) {
- pointerInside=inside;hovered=inside && enabled
+ func updateHover(_ inside:Bool,openOnHover:Bool) {
+ pointerInside=inside
  if inside { pending?.cancel();if openOnHover { enter() } } else { leave() }
  }
  func enter() { pending?.cancel(); state.enter() }
@@ -80,7 +79,7 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  panel.level = NSWindow.Level(rawValue:NSWindow.Level.mainMenu.rawValue-1); panel.hidesOnDeactivate=false; panel.collectionBehavior=[.canJoinAllSpaces,.canJoinAllApplications,.fullScreenAuxiliary,.stationary]; panel.isMovable=false
  panel.contentView=IslandHostingView(rootView:IslandView(model:model,preferences:preferences,local:local,music:music,calendar:calendar,activity:activity,usage:usage,statistics:statistics,settings:settings))
  preferences.$value.map{$0.normalized().expandedWidth}.removeDuplicates().dropFirst().sink { [weak self] _ in DispatchQueue.main.async { self?.refreshGeometry() } }.store(in:&subscriptions)
- preferences.$value.map{($0.hoverEnabled,$0.openOnHover)}.removeDuplicates(by: ==).dropFirst().sink { [weak self] _ in
+ preferences.$value.map(\.openOnHover).removeDuplicates().dropFirst().sink { [weak self] _ in
  DispatchQueue.main.async { guard let self else { return };self.model.pointerInside=false;self.updatePointer() }
  }.store(in:&subscriptions)
  if let monitor=NSEvent.addGlobalMonitorForEvents(matching:[.mouseMoved,.leftMouseDragged,.rightMouseDragged,.leftMouseDown,.rightMouseDown]) { [weak self] event in
@@ -173,6 +172,6 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  // The compact native window is exactly the activation strip, so it receives both clicks without a prior mouse move.
  panel.ignoresMouseEvents = !model.state.expanded && panel.frame == layout.windowFrame(expanded:false,sideWidth:model.sideWidth) ? false : !inside
  let hoverInside=layout.containsHover(p,expanded:model.state.expanded,sideWidth:model.sideWidth)
- if hoverInside != model.pointerInside || model.hovered != (hoverInside && preferences.value.hoverEnabled) { model.updateHover(hoverInside,enabled:preferences.value.hoverEnabled,openOnHover:preferences.value.openOnHover) }
+ if hoverInside != model.pointerInside { model.updateHover(hoverInside,openOnHover:preferences.value.openOnHover) }
  }
 }

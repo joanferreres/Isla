@@ -23,7 +23,6 @@ public enum AINotificationMode:String,Codable,CaseIterable,Sendable {
  public var next:Self { switch self { case .sound:.visual;case .visual:.none;case .none:.sound } }
 }
 public struct Preferences: Codable, Equatable {
- public var hoverEnabled = true
  public var openOnHover = false
  public var reduceMotion = false
  public var expandedWidth: Double = 640
@@ -50,11 +49,10 @@ public struct Preferences: Codable, Equatable {
  public var screenshotClipboardEnabled=true
  public var selectedCalendarIDs: [String] = []
  public init() {}
- enum CodingKeys: String, CodingKey { case openOnHover,cursorEnabled,claudeEnabled,showCursorOnHome,showClaudeOnHome,screenshotsEnabled,screenshotClipboardEnabled,notificationMode,moonModeEnabled,showCodexOnHome,hoverEnabled,reduceMotion,expandedWidth,showOnAllDisplays,musicEnabled,calendarEnabled,codexEnabled,lidEffectEnabled,completionSoundEnabled,selectedCalendarIDs }
+ enum CodingKeys: String, CodingKey { case openOnHover,cursorEnabled,claudeEnabled,showCursorOnHome,showClaudeOnHome,screenshotsEnabled,screenshotClipboardEnabled,notificationMode,moonModeEnabled,showCodexOnHome,reduceMotion,expandedWidth,showOnAllDisplays,musicEnabled,calendarEnabled,codexEnabled,lidEffectEnabled,completionSoundEnabled,selectedCalendarIDs }
  public init(from decoder: Decoder) throws {
  let c = try decoder.container(keyedBy:CodingKeys.self)
  openOnHover = try c.decodeIfPresent(Bool.self,forKey:.openOnHover) ?? false
- hoverEnabled = try c.decodeIfPresent(Bool.self,forKey:.hoverEnabled) ?? true
  reduceMotion = try c.decodeIfPresent(Bool.self,forKey:.reduceMotion) ?? false
  expandedWidth = try c.decodeIfPresent(Double.self,forKey:.expandedWidth) ?? 640
  showOnAllDisplays = try c.decodeIfPresent(Bool.self,forKey:.showOnAllDisplays) ?? true

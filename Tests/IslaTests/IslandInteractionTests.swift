@@ -21,21 +21,21 @@ import IslandCore
  XCTAssertTrue(view.acceptsFirstMouse(for:nil))
  XCTAssertNotNil(view.hitTest(NSPoint(x:146,y:6)))
  }
- func testHoverHighlightsWithoutOpeningAndClickOpensUnpinned() {
+ func testHoverDoesNotOpenUnlessEnabledAndClickOpensUnpinned() {
  let model=IslandModel()
- model.updateHover(true,enabled:true,openOnHover:false)
- XCTAssertTrue(model.hovered);XCTAssertFalse(model.state.expanded)
+ model.updateHover(true,openOnHover:false)
+ XCTAssertFalse(model.state.expanded)
  model.enter()
  XCTAssertTrue(model.state.expanded);XCTAssertFalse(model.state.pinned)
  }
  func testOptionalHoverOpeningStillWorks() {
- let model=IslandModel();model.updateHover(true,enabled:true,openOnHover:true)
+ let model=IslandModel();model.updateHover(true,openOnHover:true)
  XCTAssertTrue(model.state.expanded)
  }
  func testLeavingClosesUnlessPinned() async throws {
- let model=IslandModel();model.enter();model.updateHover(false,enabled:true,openOnHover:false)
+ let model=IslandModel();model.enter();model.updateHover(false,openOnHover:false)
  try await Task.sleep(for:.milliseconds(320));XCTAssertFalse(model.state.expanded)
- model.toggle();model.updateHover(false,enabled:true,openOnHover:false)
+ model.toggle();model.updateHover(false,openOnHover:false)
  try await Task.sleep(for:.milliseconds(320));XCTAssertTrue(model.state.expanded)
  }
  func testDropsResolveMultipleFilesOnceInOrderAndWithoutDuplicates() async throws {
