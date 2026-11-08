@@ -4,7 +4,7 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
  func artwork(for trackID:String) -> Data? { artworkTrackID == trackID ? artwork : nil }
 }
 @MainActor enum MusicHelper {
- static func run(_ operation:String) {
+ static func run(_ operation:String,argument:String?=nil) {
  var reply=MusicReply()
  if !NSRunningApplication.runningApplications(withBundleIdentifier:"com.apple.Music").isEmpty {
  let source:String
@@ -29,6 +29,16 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
  case "next": source="tell application \"Music\" to next track"
  case "playPause": source="tell application \"Music\" to playpause"
  case "pause": source="tell application \"Music\" to pause"
+ case "cue":
+ if let argument,let seconds=Double(argument),seconds.isFinite,seconds>=0 {
+ let position=String(format:"%.3f",locale:Locale(identifier:"en_US_POSIX"),seconds)
+ source="""
+ tell application "Music"
+ set player position to \(position)
+ if player state is not playing then play
+ end tell
+ """
+ } else { source="return {}" }
  default: source="return {}"
  }
  var error:NSDictionary?
@@ -53,13 +63,13 @@ actor AppleMusicBridge:AppleMusicReading {
  private var retrySystemAfter=Date.distantPast
 
  func isRunning() async -> Bool { await MainActor.run { !NSRunningApplication.runningApplications(withBundleIdentifier:"com.apple.Music").isEmpty } }
- func query(_ operation:String) throws -> MusicReply {
+ func query(_ operation:String,argument:String?=nil) throws -> MusicReply {
  let url=URL(fileURLWithPath:CommandLine.arguments[0])
  let file=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
  FileManager.default.createFile(atPath:file.path,contents:nil)
  defer { try? FileManager.default.removeItem(at:file) }
  let handle=try FileHandle(forWritingTo:file);defer { try? handle.close() }
- let process=Process();process.executableURL=url;process.arguments=["--music-helper",operation];process.standardOutput=handle;process.standardError=FileHandle.nullDevice
+ let process=Process();process.executableURL=url;process.arguments=["--music-helper",operation]+(argument.map{[$0]} ?? []);process.standardOutput=handle;process.standardError=FileHandle.nullDevice
  try process.run()
  let deadline=Date().addingTimeInterval(10)
  while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval:0.02) }
@@ -81,5 +91,13 @@ actor AppleMusicBridge:AppleMusicReading {
  if trackID.hasPrefix("mediaremote:") { return systemReply?.artwork(for:trackID) }
  return try query("artwork").artwork(for:trackID)
  }
- func send(_ command:MediaCommand) async throws { _=try query(command.rawValue) }
+ func send(_ command:MediaCommand) async throws {
+ switch command {
+ case .previous: _=try query("previous")
+ case .playPause: _=try query("playPause")
+ case .pause: _=try query("pause")
+ case .next: _=try query("next")
+ case .cue(let seconds): _=try query("cue",argument:String(seconds))
+ }
+ }
 }

@@ -60,5 +60,17 @@ import IslandCore
  }
  } catch { guard enabled,current == generation else { return };self.error=error.localizedDescription;state.update(nil);if (error as? MusicFailure)?.code == -1743 { permissionDenied=true;timer?.invalidate();timer=nil } }
  }
- func send(_ command:MediaCommand) { guard !permissionDenied else { return };Task { do { guard await reader.isRunning() else { state.update(nil);return };try await reader.send(command);await refresh() } catch { self.error=error.localizedDescription } } }
+ func cue(to progress:Double,trackID:String) {
+ guard progress.isFinite,let snapshot=state.snapshot,snapshot.trackID == trackID,snapshot.duration.isFinite,snapshot.duration>0 else { return }
+ let position=min(max(0,snapshot.duration-0.25),max(0,progress)*snapshot.duration)
+ send(.cue(seconds:position),trackID:trackID)
+ }
+ func send(_ command:MediaCommand,trackID:String?=nil) {
+ guard !permissionDenied else { return }
+ Task { do {
+ guard await reader.isRunning() else { state.update(nil);return }
+ guard trackID == nil || state.snapshot?.trackID == trackID else { return }
+ try await reader.send(command);await refresh()
+ } catch { self.error=error.localizedDescription } }
+ }
 }

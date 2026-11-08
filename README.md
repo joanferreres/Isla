@@ -26,7 +26,7 @@ Si el repositorio es privado, el propietario debe invitar a su amigo como colabo
 ## Qué incluye
 
 - Clic dentro del notch para abrir la isla; menú secundario con ajustes, fijar y salir.
-- Tocadiscos de Apple Music en una ventana propia: vinilo centrado, ondas azules, aguja que puedes levantar para pausar y controles inferiores con Liquid Glass nativo.
+- Tocadiscos de Apple Music en una ventana propia: vinilo centrado, ondas azules, aguja arrastrable para cambiar de posición y controles inferiores con Liquid Glass nativo.
 - Carátula y controles de Apple Music, y metadatos multimedia compatibles.
 - Calendario, agenda y recordatorio del siguiente evento durante los diez minutos anteriores.
 - Información de uso de Codex, Cursor y Claude cuando la integración y la sesión lo permiten. Los límites mostrados dependen de los datos que facilite cada servicio.
@@ -41,7 +41,7 @@ Cada persona configura sus propias cuentas y permisos. El paquete no contiene ca
 
 ## Estado del proyecto
 
-Versión actual: **0.8.17**. Hay 120 pruebas automatizadas, pero estas no sustituyen la comprobación en otros Macs. Los clics dentro del notch físico requieren validación con entrada física en el equipo de destino. El mensaje de apertura recibido en el Mac de un amigo sigue pendiente de diagnóstico.
+Versión actual: **0.8.18**. Hay 122 pruebas automatizadas, pero estas no sustituyen la comprobación en otros Macs. Los clics dentro del notch físico requieren validación con entrada física en el equipo de destino. El mensaje de apertura recibido en el Mac de un amigo sigue pendiente de diagnóstico.
 
 Las integraciones multimedia, el sensor de tapa y algunos datos de IA usan interfaces que pueden cambiar entre versiones. Las consultas de límites no representan una garantía de crédito disponible.
 

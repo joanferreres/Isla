@@ -45,7 +45,7 @@ import IslandCore
     }
 
     private func turntable(diameter: CGFloat, snapshot: MediaSnapshot?, ticking: Bool, spinning: Bool) -> some View {
-        let width = diameter * 1.13
+        let width = diameter * RecordCue.armWidth
         return TimelineView(.animation(minimumInterval: spinning ? 1.0 / 30 : 1, paused: !ticking)) { context in
             let elapsed = playbackSeconds(snapshot, at: context.date)
             let duration = snapshot?.duration ?? 0
@@ -64,9 +64,16 @@ import IslandCore
                 }
                 .accessibilityHidden(true)
                 .overlay(alignment: .topLeading) {
-                    Tonearm(angle: playing ? 18 + 24 * progress : 0, playing: playing, accent: accent) {
-                        music.send(.pause)
-                    }
+                    Tonearm(angle: playing ? RecordCue.angle(at: progress) : 0,
+                            loaded: snapshot != nil, playing: playing, progress: progress,
+                            canSeek: duration.isFinite && duration > 0, accent: accent,
+                            tap: { music.send(playing ? .pause : .playPause) },
+                            drop: { fraction in
+                                guard let snapshot else { return }
+                                if let fraction { music.cue(to: fraction, trackID: snapshot.trackID) }
+                                else if playing { music.send(.pause, trackID: snapshot.trackID) }
+                            })
+                    .id(snapshot?.trackID)
                     .frame(width: width, height: diameter)
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.34), value: playing)
                 }
@@ -246,16 +253,22 @@ private struct VinylRecord: View {
 
 private struct Tonearm: View {
     let angle: Double
+    let loaded: Bool
     let playing: Bool
+    let progress: Double
+    let canSeek: Bool
     let accent: Color
-    let lift: () -> Void
+    let tap: () -> Void
+    let drop: (Double?) -> Void
+    @GestureState private var dragPoint: CGPoint?
 
     var body: some View {
-        Canvas { context, size in
+        let cueAngle = dragPoint.map { point in RecordCue.progress(at: point).map(RecordCue.angle(at:)) ?? 0 } ?? angle
+        return Canvas { context, size in
             let d = size.height
-            let pivot = CGPoint(x: d * 1.025, y: d * 0.145)
+            let pivot = CGPoint(x: d * RecordCue.pivot.x, y: d * RecordCue.pivot.y)
             let elbow = CGPoint(x: d * 1.047, y: d * 0.64)
-            let tip = CGPoint(x: d * 1.008, y: d * 0.876)
+            let tip = CGPoint(x: d * RecordCue.needle.x, y: d * RecordCue.needle.y)
             let metal = Color(red: 0.63, green: 0.72, blue: 0.84)
             func circle(_ center: CGPoint, _ radius: CGFloat) -> Path {
                 Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
@@ -272,22 +285,41 @@ private struct Tonearm: View {
             context.fill(Path(roundedRect: cartridge, cornerRadius: d * 0.004), with: .color(metal))
             context.fill(circle(tip, d * 0.007), with: .color(accent))
         }
+        .rotationEffect(.degrees(cueAngle), anchor: UnitPoint(x: RecordCue.pivot.x / RecordCue.armWidth, y: RecordCue.pivot.y))
         .accessibilityHidden(true)
         .overlay {
-            if playing {
+            if loaded {
                 GeometryReader { proxy in
                     let d = proxy.size.height
-                    Button(action: lift) {
+                    let tip = RecordCue.tip(at: cueAngle)
+                    Button(action: tap) {
                         Color.clear.frame(width: 44, height: 44).contentShape(Circle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Levantar la aguja y pausar")
-                    .help("Pulsa o arrastra para levantar la aguja")
-                    .simultaneousGesture(DragGesture(minimumDistance: 6).onEnded { _ in lift() })
-                    .position(x: d * 1.008, y: d * 0.865)
+                    .accessibilityLabel(playing ? "Levantar la aguja y pausar" : "Bajar la aguja y reproducir")
+                    .accessibilityAdjustableAction { direction in
+                        guard canSeek else { return }
+                        switch direction {
+                        case .increment: drop(min(1, progress + 0.05))
+                        case .decrement: drop(max(0, progress - 0.05))
+                        @unknown default: break
+                        }
+                    }
+                    .help(canSeek ? "Arrastra la aguja a otro surco para saltar a ese punto" : "Pulsa para pausar o reproducir")
+                    .highPriorityGesture(
+                        DragGesture(minimumDistance: 6, coordinateSpace: .named("recordCue"))
+                            .updating($dragPoint) { value, point, _ in
+                                if canSeek { point = CGPoint(x: value.location.x / d, y: value.location.y / d) }
+                            }
+                            .onEnded { value in
+                                guard canSeek else { return }
+                                drop(RecordCue.progress(at: CGPoint(x: value.location.x / d, y: value.location.y / d)))
+                            }
+                    )
+                    .position(x: d * tip.x, y: d * tip.y)
                 }
             }
         }
-        .rotationEffect(.degrees(angle), anchor: UnitPoint(x: 1.025 / 1.13, y: 0.145))
+        .coordinateSpace(name: "recordCue")
     }
 }
