@@ -1,28 +1,39 @@
 import SwiftUI
 import IslandCore
 
-@MainActor enum RecordPlayerPalette {
-    static let background = NSColor(srgbRed: 0.045, green: 0.061, blue: 0.091, alpha: 1)
-    static let accent = Color(red: 0.48, green: 0.69, blue: 1.0)
-    static let ink = Color(red: 0.92, green: 0.95, blue: 1.0)
+enum RecordPlayerPalette: String, CaseIterable, Identifiable {
+    case blue, amber
+
+    var id: Self { self }
+    var title: String { self == .blue ? "Azul" : "Ámbar" }
+    var shortcut: String { self == .blue ? "1" : "2" }
+    var background: NSColor {
+        self == .blue ? NSColor(srgbRed: 0.045, green: 0.061, blue: 0.091, alpha: 1)
+            : NSColor(srgbRed: 0.092, green: 0.061, blue: 0.043, alpha: 1)
+    }
+    var accent: Color { self == .blue ? Color(red: 0.48, green: 0.69, blue: 1) : Color(red: 0.98, green: 0.71, blue: 0.39) }
+    var ink: Color { self == .blue ? Color(red: 0.92, green: 0.95, blue: 1) : Color(red: 1, green: 0.94, blue: 0.86) }
+    var vinyl: Color { self == .blue ? Color(red: 0.055, green: 0.067, blue: 0.09) : Color(red: 0.10, green: 0.067, blue: 0.051) }
+    var metal: Color { self == .blue ? Color(red: 0.63, green: 0.72, blue: 0.84) : Color(red: 0.78, green: 0.66, blue: 0.49) }
 }
 
 @MainActor struct RecordPlayerView: View {
     @ObservedObject var music: AppleMusicService
     @ObservedObject var preferences: PreferencesStore
-    @ObservedObject var visibility: RecordPlayerVisibility
+    @ObservedObject var presentation: RecordPlayerPresentation
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var artwork: NSImage?
 
-    private let ink = RecordPlayerPalette.ink
-    private let accent = RecordPlayerPalette.accent
+    private var palette: RecordPlayerPalette { presentation.palette }
+    private var ink: Color { palette.ink }
+    private var accent: Color { palette.accent }
 
     var body: some View {
         GeometryReader { proxy in
             let diameter = max(120, min(660, (proxy.size.width - 48) / 1.28, (proxy.size.height - 176) / 1.22))
             let snapshot = music.state.snapshot
-            let ticking = visibility.isVisible && snapshot?.playing == true
+            let ticking = presentation.isVisible && snapshot?.playing == true
             let spinning = ticking && !reduceMotion
             ZStack {
                 turntable(diameter: diameter, snapshot: snapshot, ticking: ticking, spinning: spinning)
@@ -37,7 +48,7 @@ import IslandCore
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .foregroundStyle(ink)
-        .background(Color(nsColor: RecordPlayerPalette.background).ignoresSafeArea())
+        .background(Color(nsColor: palette.background).ignoresSafeArea())
         .preferredColorScheme(.dark)
         .onChange(of: music.state.artworkData, initial: true) { _, data in
             artwork = data.flatMap(NSImage.init(data:))
@@ -52,7 +63,7 @@ import IslandCore
             let progress = duration > 0 ? min(1, elapsed / duration) : 0
             let phase = elapsed.truncatingRemainder(dividingBy: 3.6) * 100
             let playing = snapshot?.playing == true
-            VinylRecord(artwork: artwork, accent: accent)
+            VinylRecord(artwork: artwork, palette: palette)
                 .frame(width: diameter, height: diameter)
                 .rotationEffect(.degrees(reduceMotion ? 0 : phase))
                 .background {
@@ -66,7 +77,7 @@ import IslandCore
                 .overlay(alignment: .topLeading) {
                     Tonearm(angle: playing ? RecordCue.angle(at: progress) : 0,
                             loaded: snapshot != nil, playing: playing, progress: progress,
-                            canSeek: duration.isFinite && duration > 0, accent: accent,
+                            canSeek: duration.isFinite && duration > 0, palette: palette,
                             tap: { music.send(playing ? .pause : .playPause) },
                             drop: { fraction in
                                 guard let snapshot else { return }
@@ -137,6 +148,8 @@ import IslandCore
                     Button("Conectar Apple Music") { preferences.value.musicEnabled = true }
                 }
             }
+            Divider().frame(height: 22).accessibilityHidden(true)
+            paletteSelector
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 6)
@@ -147,6 +160,28 @@ import IslandCore
             }
             playbackMaterial(controls)
         }
+    }
+
+    private var paletteSelector: some View {
+        HStack(spacing: 2) {
+            ForEach(RecordPlayerPalette.allCases) { item in
+                Button { presentation.select(item) } label: {
+                    HStack(spacing: 4) {
+                        Circle().fill(item.accent).frame(width: 7, height: 7)
+                        Text("⌘\(item.shortcut)").font(.caption.monospacedDigit())
+                    }
+                    .frame(minWidth: 47, minHeight: 44)
+                    .contentShape(Rectangle())
+                    .background(item == palette ? item.accent.opacity(0.13) : .clear,
+                                in: RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Ambiente \(item.title)")
+                .accessibilityAddTraits(item == palette ? .isSelected : [])
+                .help("Ambiente \(item.title) · ⌘\(item.shortcut)")
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     @ViewBuilder private func playbackMaterial<Content: View>(_ content: Content) -> some View {
@@ -242,13 +277,13 @@ private struct RecordSoundWaves: View {
 
 private struct VinylRecord: View {
     let artwork: NSImage?
-    let accent: Color
+    let palette: RecordPlayerPalette
 
     var body: some View {
         GeometryReader { proxy in
             let size = proxy.size.width
             ZStack {
-                Circle().fill(Color(red: 0.055, green: 0.067, blue: 0.09))
+                Circle().fill(palette.vinyl)
                 Canvas { context, dimensions in
                     let center = CGPoint(x: dimensions.width / 2, y: dimensions.height / 2)
                     for index in 0..<44 {
@@ -262,7 +297,7 @@ private struct VinylRecord: View {
                     if let artwork {
                         Image(nsImage: artwork).resizable().scaledToFill()
                     } else {
-                        Circle().fill(accent.opacity(0.78))
+                        Circle().fill(palette.accent.opacity(0.78))
                             .overlay(Circle().strokeBorder(.black.opacity(0.30), lineWidth: 1).padding(size * 0.04))
                     }
                 }
@@ -282,7 +317,7 @@ private struct Tonearm: View {
     let playing: Bool
     let progress: Double
     let canSeek: Bool
-    let accent: Color
+    let palette: RecordPlayerPalette
     let tap: () -> Void
     let drop: (Double?) -> Void
     @GestureState private var dragPoint: CGPoint?
@@ -294,7 +329,7 @@ private struct Tonearm: View {
             let pivot = CGPoint(x: d * RecordCue.pivot.x, y: d * RecordCue.pivot.y)
             let elbow = CGPoint(x: d * 1.047, y: d * 0.64)
             let tip = CGPoint(x: d * RecordCue.needle.x, y: d * RecordCue.needle.y)
-            let metal = Color(red: 0.63, green: 0.72, blue: 0.84)
+            let metal = palette.metal
             func circle(_ center: CGPoint, _ radius: CGFloat) -> Path {
                 Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
             }
@@ -305,10 +340,10 @@ private struct Tonearm: View {
             context.stroke(arm, with: .color(metal), style: StrokeStyle(lineWidth: d * 0.010, lineCap: .round, lineJoin: .round))
             context.fill(circle(pivot, d * 0.042), with: .color(Color(white: 0.17)))
             context.stroke(circle(pivot, d * 0.034), with: .color(metal), lineWidth: 1)
-            context.fill(circle(pivot, d * 0.012), with: .color(accent))
+            context.fill(circle(pivot, d * 0.012), with: .color(palette.accent))
             let cartridge = CGRect(x: tip.x - d * 0.015, y: tip.y - d * 0.038, width: d * 0.03, height: d * 0.046)
             context.fill(Path(roundedRect: cartridge, cornerRadius: d * 0.004), with: .color(metal))
-            context.fill(circle(tip, d * 0.007), with: .color(accent))
+            context.fill(circle(tip, d * 0.007), with: .color(palette.accent))
         }
         .rotationEffect(.degrees(cueAngle), anchor: UnitPoint(x: RecordCue.pivot.x / RecordCue.armWidth, y: RecordCue.pivot.y))
         .accessibilityHidden(true)
