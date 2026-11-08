@@ -154,7 +154,7 @@ import IslandCore
         if reduceTransparency {
             content.background(Color(white: 0.15), in: shape)
         } else if #available(macOS 26.0, *) {
-            content.glassEffect(.clear, in: shape)
+            RecordPlaybackGlass(content: content)
         } else {
             content.background(.regularMaterial, in: shape)
         }
@@ -182,6 +182,31 @@ import IslandCore
         guard seconds.isFinite, seconds >= 0, seconds < Double(Int.max) else { return "–:––" }
         let total = Int(seconds)
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+@available(macOS 26.0, *)
+private struct RecordPlaybackGlass<Content: View>: NSViewRepresentable {
+    let content: Content
+
+    func makeNSView(context: Context) -> NSGlassEffectView {
+        let glass = NSGlassEffectView()
+        glass.style = .clear
+        glass.cornerRadius = 28
+        if #available(macOS 27.0, *) { glass.effectIsInteractive = true }
+        let controls = NSHostingView(rootView: content)
+        controls.autoresizingMask = [.width, .height]
+        glass.contentView = controls
+        return glass
+    }
+
+    func updateNSView(_ glass: NSGlassEffectView, context: Context) {
+        (glass.contentView as? NSHostingView<Content>)?.rootView = content
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSGlassEffectView, context: Context) -> CGSize? {
+        let fittingHeight = nsView.contentView?.fittingSize.height ?? 0
+        return CGSize(width: min(proposal.width ?? 560, 560), height: max(56, fittingHeight))
     }
 }
 
