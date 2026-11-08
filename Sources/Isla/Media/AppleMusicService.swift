@@ -65,6 +65,12 @@ import IslandCore
  let position=min(max(0,snapshot.duration-0.25),max(0,progress)*snapshot.duration)
  send(.cue(seconds:position),trackID:trackID)
  }
+ func mixerVolume(_ value: Int? = nil) async throws -> Int {
+ guard enabled, !permissionDenied else {
+ throw MusicFailure(message: "Conecta Apple Music para controlar su volumen.")
+ }
+ return try await reader.volume(value)
+ }
  func send(_ command:MediaCommand,trackID:String?=nil) {
  guard !permissionDenied else { return }
  Task { do {

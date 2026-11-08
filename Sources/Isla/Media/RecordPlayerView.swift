@@ -64,12 +64,18 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
 
     var body: some View {
         GeometryReader { proxy in
-            let diameter = max(120, min(660, (proxy.size.width - 48) / 1.28, (proxy.size.height - 176) / 1.22))
+            let diameter = max(120, min(660, (proxy.size.width - 274) / 1.22, (proxy.size.height - 176) / 1.22))
             let snapshot = music.state.snapshot
             let ticking = presentation.isVisible && snapshot?.playing == true
             let spinning = ticking && !reduceMotion
             ZStack {
-                turntable(diameter: diameter, snapshot: snapshot, ticking: ticking, spinning: spinning)
+                HStack(spacing: diameter * 0.14 + 14) {
+                    turntable(diameter: diameter, snapshot: snapshot, ticking: ticking, spinning: spinning)
+                    RecordPlayerMixer(music: music, palette: palette,
+                                      active: presentation.isVisible && music.enabled)
+                        .frame(width: 200)
+                }
+                .padding(.leading, diameter * 0.11)
                 VStack {
                     trackHeading(snapshot)
                     Spacer(minLength: 0)

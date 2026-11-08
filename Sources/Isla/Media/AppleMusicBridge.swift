@@ -1,6 +1,6 @@
 import AppKit
 import IslandCore
-struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Data?;var artworkTrackID:String?;var error:String?;var errorCode:Int?
+struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Data?;var artworkTrackID:String?;var error:String?;var errorCode:Int?;var volume:Int?
  func artwork(for trackID:String) -> Data? { artworkTrackID == trackID ? artwork : nil }
 }
 @MainActor enum MusicHelper {
@@ -25,6 +25,15 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
  end try
  end tell
  """
+ case "volume":
+ if let argument, let volume = Int(argument), (0...100).contains(volume) {
+ source = """
+ tell application "Music"
+ set sound volume to \(volume)
+ return sound volume
+ end tell
+ """
+ } else { source = "tell application \"Music\" to get sound volume" }
  case "previous": source="tell application \"Music\" to previous track"
  case "next": source="tell application \"Music\" to next track"
  case "playPause": source="tell application \"Music\" to playpause"
@@ -44,6 +53,9 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
  var error:NSDictionary?
  let descriptor=NSAppleScript(source:source)?.executeAndReturnError(&error)
  if let error { reply.errorCode=error[NSAppleScript.errorNumber] as? Int;reply.error=reply.errorCode == -1743 ? "Permite a Isla controlar Apple Music en Privacidad > Automatización." : "Apple Music no respondió a la consulta." }
+ else if operation == "volume", let descriptor, descriptor.descriptorType == typeSInt32 {
+ reply.volume = Int(descriptor.int32Value)
+ }
  else if operation == "read",let d=descriptor,d.numberOfItems == 6 {
  reply.snapshot=MediaSnapshot(trackID:d.atIndex(1)?.stringValue ?? "",title:d.atIndex(2)?.stringValue ?? "",artist:d.atIndex(3)?.stringValue ?? "",playing:d.atIndex(4)?.booleanValue ?? false,position:Double(d.atIndex(5)?.stringValue ?? "") ?? d.atIndex(5)?.doubleValue ?? 0,duration:Double(d.atIndex(6)?.stringValue ?? "") ?? d.atIndex(6)?.doubleValue ?? 0)
  } else if operation == "artwork",let descriptor,descriptor.numberOfItems == 2,let data=descriptor.atIndex(2)?.data,NSImage(data:data) != nil { reply.artwork=data;reply.artworkTrackID=descriptor.atIndex(1)?.stringValue }
@@ -56,6 +68,7 @@ protocol AppleMusicReading:Sendable {
  func read() async throws -> MediaSnapshot?
  func artwork(trackID:String) async throws -> Data?
  func send(_ command:MediaCommand) async throws
+ func volume(_ value: Int?) async throws -> Int
 }
 struct MusicFailure:LocalizedError { var message:String;var code:Int?=nil;var errorDescription:String? { message } }
 actor AppleMusicBridge:AppleMusicReading {
@@ -90,6 +103,12 @@ actor AppleMusicBridge:AppleMusicReading {
  func artwork(trackID:String) async throws -> Data? {
  if trackID.hasPrefix("mediaremote:") { return systemReply?.artwork(for:trackID) }
  return try query("artwork").artwork(for:trackID)
+ }
+ func volume(_ value: Int?) async throws -> Int {
+ guard let volume = try query("volume", argument: value.map(String.init)).volume else {
+ throw MusicFailure(message: "Abre Música para controlar su volumen.")
+ }
+ return volume
  }
  func send(_ command:MediaCommand) async throws {
  switch command {

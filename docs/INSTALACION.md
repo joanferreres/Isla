@@ -27,7 +27,7 @@ Abre Isla desde su icono de la barra de menús y entra en **Ajustes**. En la isl
 | Función | Configuración y permiso |
 | --- | --- |
 | Música | Activa Apple Music. Acepta Automatización de Music si quieres controlarla desde Isla. |
-| Tocadiscos | Pulsa el disco junto a la luna. El botón verde lo abre a pantalla completa. Mantén pulsado ⌘ en la barra para ver los seis ambientes, o cambia directamente con ⌘1 a ⌘6. |
+| Tocadiscos | Pulsa el disco junto a la luna. El botón verde lo abre a pantalla completa. Mantén pulsado ⌘ en la barra para ver los seis ambientes, o cambia directamente con ⌘1 a ⌘6. El fader vertical ajusta el volumen de Música. Para los mandos de EQ, abre **Configurar EQ**, activa Isla en Accesibilidad y deja abierto el ecualizador de Música (⌥⌘E). |
 | Calendario | Activa Calendario y concede acceso a los calendarios que quieras consultar. |
 | IA | Inicia sesión en tus propias aplicaciones y activa las conexiones de Codex, Cursor o Claude. La disponibilidad de datos depende de cada servicio. |
 | Avisos | La luna permite sonido y señal visual, solo señal visual o ningún aviso. La chincheta mantiene la isla abierta. |
