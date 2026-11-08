@@ -24,6 +24,23 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var artwork: NSImage?
+    @State private var pendingCue: PendingCue?
+
+    private struct PendingCue: Equatable {
+        let trackID: String
+        let fraction: Double?
+        let issuedAt = Date()
+
+        var angle: Double { fraction.map(RecordCue.angle(at:)) ?? 0 }
+
+        func isConfirmed(by snapshot: MediaSnapshot) -> Bool {
+            guard let fraction else { return !snapshot.playing }
+            let target = min(max(0, snapshot.duration - 0.25), fraction * snapshot.duration)
+            let elapsed = Date().timeIntervalSince(issuedAt)
+            return snapshot.playing && snapshot.position >= target - 0.75
+                && snapshot.position <= target + elapsed + 0.75
+        }
+    }
 
     private var palette: RecordPlayerPalette { presentation.palette }
     private var ink: Color { palette.ink }
@@ -53,6 +70,19 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
         .onChange(of: music.state.artworkData, initial: true) { _, data in
             artwork = data.flatMap(NSImage.init(data:))
         }
+        .onChange(of: music.state.snapshot) { _, snapshot in
+            guard let cue = pendingCue else { return }
+            if let snapshot, snapshot.trackID == cue.trackID, !cue.isConfirmed(by: snapshot) { return }
+            pendingCue = nil
+        }
+        .onChange(of: music.error) { _, error in
+            if error != nil { pendingCue = nil }
+        }
+        .task(id: pendingCue) {
+            guard let cue = pendingCue else { return }
+            try? await Task.sleep(for: .seconds(4))
+            if !Task.isCancelled, pendingCue == cue { pendingCue = nil }
+        }
     }
 
     private func turntable(diameter: CGFloat, snapshot: MediaSnapshot?, ticking: Bool, spinning: Bool) -> some View {
@@ -75,21 +105,38 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                 }
                 .accessibilityHidden(true)
                 .overlay(alignment: .topLeading) {
-                    Tonearm(angle: playing ? RecordCue.angle(at: progress) : 0,
-                            loaded: snapshot != nil, playing: playing, progress: progress,
+                    let preview = pendingCue.flatMap { $0.trackID == snapshot?.trackID ? $0 : nil }
+                    Tonearm(angle: preview?.angle ?? (playing ? RecordCue.angle(at: progress) : 0),
+                            trackID: snapshot?.trackID, playing: playing, progress: progress,
                             canSeek: duration.isFinite && duration > 0, palette: palette,
-                            tap: { music.send(playing ? .pause : .playPause) },
+                            animation: reduceMotion ? nil : .easeInOut(duration: 0.26),
+                            tap: {
+                                guard let snapshot else { return }
+                                if playing {
+                                    parkArm(for: snapshot)
+                                } else {
+                                    music.send(.playPause, trackID: snapshot.trackID)
+                                }
+                            },
                             drop: { fraction in
                                 guard let snapshot else { return }
-                                if let fraction { music.cue(to: fraction, trackID: snapshot.trackID) }
-                                else if playing { music.send(.pause, trackID: snapshot.trackID) }
+                                if let fraction {
+                                    // Hold the chosen groove while Music reports the new position.
+                                    pendingCue = PendingCue(trackID: snapshot.trackID, fraction: fraction)
+                                    music.cue(to: fraction, trackID: snapshot.trackID)
+                                } else if playing || pendingCue?.fraction != nil {
+                                    parkArm(for: snapshot)
+                                }
                             })
-                    .id(snapshot?.trackID)
                     .frame(width: width, height: diameter)
-                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.34), value: playing)
                 }
         }
         .frame(width: diameter, height: diameter)
+    }
+
+    private func parkArm(for snapshot: MediaSnapshot) {
+        pendingCue = PendingCue(trackID: snapshot.trackID, fraction: nil)
+        music.send(.pause, trackID: snapshot.trackID)
     }
 
     private func playbackSeconds(_ snapshot: MediaSnapshot?, at date: Date) -> Double {
@@ -101,16 +148,17 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     private func trackHeading(_ snapshot: MediaSnapshot?) -> some View {
         VStack(spacing: 4) {
             Label("Apple Music", systemImage: "music.note")
-                .font(.system(size: 12, weight: .medium))
+                .font(.caption.weight(.medium))
                 .foregroundStyle(accent)
             Text(snapshot?.title ?? "Sin música")
-                .font(.system(.largeTitle, design: .serif).weight(.medium))
+                .font(.largeTitle.weight(.semibold))
+                .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
                 .accessibilityAddTraits(.isHeader)
             if let snapshot, !snapshot.artist.isEmpty {
                 Text(snapshot.artist).font(.subheadline)
-                    .foregroundStyle(ink.opacity(0.72)).lineLimit(1)
+                    .foregroundStyle(.secondary).lineLimit(1)
             }
         }
         .frame(maxWidth: 540)
@@ -139,13 +187,19 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                     .font(.callout).foregroundStyle(ink.opacity(0.72))
                     .multilineTextAlignment(.leading)
                 if preferences.value.musicEnabled {
-                    Button("Abrir Música") {
+                    playerButton {
                         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Music") {
                             NSWorkspace.shared.openApplication(at: url, configuration: .init()) { _, _ in }
                         }
+                    } label: {
+                        Text("Abrir Música")
                     }
                 } else {
-                    Button("Conectar Apple Music") { preferences.value.musicEnabled = true }
+                    playerButton(tint: accent) {
+                        preferences.value.musicEnabled = true
+                    } label: {
+                        Text("Conectar Apple Music")
+                    }
                 }
             }
             Divider().frame(height: 22).accessibilityHidden(true)
@@ -163,19 +217,19 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     }
 
     private var paletteSelector: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 6) {
             ForEach(RecordPlayerPalette.allCases) { item in
-                Button { presentation.select(item) } label: {
+                playerButton(tint: item == palette ? item.accent : nil) {
+                    presentation.select(item)
+                } label: {
                     HStack(spacing: 4) {
-                        Circle().fill(item.accent).frame(width: 7, height: 7)
+                        Image(systemName: item == palette ? "checkmark" : "circle.fill")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(item == palette ? Color.primary : item.accent)
+                            .frame(width: 9)
                         Text("⌘\(item.shortcut)").font(.caption.monospacedDigit())
                     }
-                    .frame(minWidth: 47, minHeight: 44)
-                    .contentShape(Rectangle())
-                    .background(item == palette ? item.accent.opacity(0.13) : .clear,
-                                in: RoundedRectangle(cornerRadius: 12))
                 }
-                .buttonStyle(.plain)
                 .accessibilityLabel("Ambiente \(item.title)")
                 .accessibilityAddTraits(item == palette ? .isSelected : [])
                 .help("Ambiente \(item.title) · ⌘\(item.shortcut)")
@@ -196,21 +250,41 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     }
 
     private func transport(playing: Bool) -> some View {
-        HStack(spacing: 2) {
-            Button { music.send(.previous) } label: {
-                Image(systemName: "backward.end.fill").frame(width: 44, height: 44)
-            }.accessibilityLabel("Canción anterior")
-            Button { music.send(.playPause) } label: {
+        HStack(spacing: 6) {
+            playerButton { music.send(.previous) } label: {
+                Image(systemName: "backward.end.fill")
+            }
+            .accessibilityLabel("Canción anterior")
+            playerButton(tint: accent) { music.send(.playPause) } label: {
                 Image(systemName: playing ? "pause.fill" : "play.fill")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(accent)
-                    .frame(width: 44, height: 44)
-            }.accessibilityLabel(playing ? "Pausar" : "Reproducir")
-            Button { music.send(.next) } label: {
-                Image(systemName: "forward.end.fill").frame(width: 44, height: 44)
-            }.accessibilityLabel("Siguiente canción")
+                    .font(.body.weight(.semibold))
+            }
+            .accessibilityLabel(playing ? "Pausar" : "Reproducir")
+            playerButton { music.send(.next) } label: {
+                Image(systemName: "forward.end.fill")
+            }
+            .accessibilityLabel("Siguiente canción")
         }
-        .buttonStyle(.borderless)
+    }
+
+    @ViewBuilder private func playerButton<Label: View>(
+        tint: Color? = nil, action: @escaping () -> Void, @ViewBuilder label: () -> Label
+    ) -> some View {
+        let button = Button(action: action) {
+            label().frame(minWidth: 24, minHeight: 32)
+        }
+        .buttonBorderShape(.capsule)
+        if #available(macOS 26.0, *), !reduceTransparency {
+            if let tint {
+                button.buttonStyle(.glassProminent).tint(tint)
+            } else {
+                button.buttonStyle(.glass)
+            }
+        } else if let tint {
+            button.buttonStyle(.borderedProminent).tint(tint)
+        } else {
+            button.buttonStyle(.bordered)
+        }
     }
 
     private func clock(_ seconds: Double) -> String {
@@ -313,17 +387,18 @@ private struct VinylRecord: View {
 
 private struct Tonearm: View {
     let angle: Double
-    let loaded: Bool
+    let trackID: String?
     let playing: Bool
     let progress: Double
     let canSeek: Bool
     let palette: RecordPlayerPalette
+    let animation: Animation?
     let tap: () -> Void
     let drop: (Double?) -> Void
     @GestureState private var dragPoint: CGPoint?
 
     var body: some View {
-        let cueAngle = dragPoint.map { point in RecordCue.progress(at: point).map(RecordCue.angle(at:)) ?? 0 } ?? angle
+        let cueAngle = dragPoint.map(RecordCue.angle(toward:)) ?? angle
         return Canvas { context, size in
             let d = size.height
             let pivot = CGPoint(x: d * RecordCue.pivot.x, y: d * RecordCue.pivot.y)
@@ -346,9 +421,12 @@ private struct Tonearm: View {
             context.fill(circle(tip, d * 0.007), with: .color(palette.accent))
         }
         .rotationEffect(.degrees(cueAngle), anchor: UnitPoint(x: RecordCue.pivot.x / RecordCue.armWidth, y: RecordCue.pivot.y))
+        .animation(dragPoint == nil ? animation : nil, value: dragPoint == nil)
+        .animation(dragPoint == nil ? animation : nil, value: trackID)
+        .animation(dragPoint == nil ? animation : nil, value: playing)
         .accessibilityHidden(true)
         .overlay {
-            if loaded {
+            if let trackID {
                 GeometryReader { proxy in
                     let d = proxy.size.height
                     let tip = RecordCue.tip(at: cueAngle)
@@ -378,6 +456,7 @@ private struct Tonearm: View {
                     )
                     .position(x: d * tip.x, y: d * tip.y)
                 }
+                .id(trackID)
             }
         }
         .coordinateSpace(name: "recordCue")

@@ -7,8 +7,11 @@ public enum RecordCue {
     public static let needle = CGPoint(x: 1.008, y: 0.876)
     public static let armWidth = 1.13
 
+    private static let outerGroove = 18.0
+    private static let travel = 24.0
+
     public static func angle(at progress: Double) -> Double {
-        18 + 24 * min(1, max(0, progress))
+        outerGroove + travel * min(1, max(0, progress))
     }
 
     public static func tip(at angle: Double) -> CGPoint {
@@ -21,9 +24,13 @@ public enum RecordCue {
 
     public static func progress(at point: CGPoint) -> Double? {
         guard hypot(point.x - 0.5, point.y - 0.5) <= 0.5 else { return nil }
+        return max(0, angle(toward: point) - outerGroove) / travel
+    }
+
+    public static func angle(toward point: CGPoint) -> Double {
         let target = atan2(point.y - pivot.y, point.x - pivot.x)
         let resting = atan2(needle.y - pivot.y, needle.x - pivot.x)
         let degrees = atan2(sin(target - resting), cos(target - resting)) * 180 / .pi
-        return min(1, max(0, (degrees - 18) / 24))
+        return min(angle(at: 1), max(0, degrees))
     }
 }

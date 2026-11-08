@@ -9,6 +9,12 @@ final class RecordCueTests: XCTestCase {
         }
     }
 
+    func testDraggingBetweenSupportAndRecordTracksThePointerWithoutSeeking() {
+        let betweenSupportAndRecord = RecordCue.tip(at: 9)
+        XCTAssertEqual(RecordCue.angle(toward: betweenSupportAndRecord), 9, accuracy: 0.0001)
+        XCTAssertNil(RecordCue.progress(at: betweenSupportAndRecord))
+    }
+
     func testDroppingOnTheSupportOrOutsideTheRecordDoesNotSeek() {
         XCTAssertNil(RecordCue.progress(at: RecordCue.tip(at: 0)))
         XCTAssertNil(RecordCue.progress(at: CGPoint(x: 0, y: 0)))
