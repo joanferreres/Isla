@@ -64,6 +64,13 @@ import IslandCore
                 VinylRecord(artwork: artwork, accent: accent)
                     .frame(width: diameter, height: diameter)
                     .rotationEffect(.degrees(reduceMotion ? 0 : phase))
+                    .background {
+                        if spinning {
+                            RecordSoundWaves(diameter: diameter, elapsed: elapsed, accent: accent)
+                                .frame(width: diameter * 1.22, height: diameter * 1.22)
+                                .allowsHitTesting(false)
+                        }
+                    }
                 Tonearm(angle: snapshot == nil ? 0 : 18 + 24 * progress, accent: accent)
                     .frame(width: width, height: diameter)
             }
@@ -155,6 +162,36 @@ import IslandCore
         guard seconds.isFinite, seconds >= 0, seconds < Double(Int.max) else { return "–:––" }
         let total = Int(seconds)
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+private struct RecordSoundWaves: View {
+    let diameter: CGFloat
+    let elapsed: Double
+    let accent: Color
+
+    var body: some View {
+        Canvas { context, size in
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            let cycle = elapsed / 3.2
+            for index in 0..<3 {
+                let offset = cycle + Double(index) / 3
+                let phase = offset.truncatingRemainder(dividingBy: 1)
+                let radius = diameter * (0.501 + 0.092 * phase)
+                let opacity = sin(.pi * phase) * (1 - 0.55 * phase)
+                var wave = Path()
+                for sample in 0..<96 {
+                    let angle = Double(sample) * 2 * .pi / 96
+                    let ripple = sin(9 * angle - 2 * .pi * phase) + 0.45 * sin(13 * angle + Double(index))
+                    let distance = radius + diameter * 0.0035 * ripple
+                    let point = CGPoint(x: center.x + distance * cos(angle), y: center.y + distance * sin(angle))
+                    if sample == 0 { wave.move(to: point) } else { wave.addLine(to: point) }
+                }
+                wave.closeSubpath()
+                context.stroke(wave, with: .color(accent.opacity(0.12 * opacity)), lineWidth: 4)
+                context.stroke(wave, with: .color(accent.opacity(0.56 * opacity)), lineWidth: 1.15)
+            }
+        }
     }
 }
 
