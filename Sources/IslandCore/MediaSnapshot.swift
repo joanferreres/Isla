@@ -8,7 +8,7 @@ public struct MediaSnapshot:Codable,Equatable,Sendable {
  public var duration:Double
  public init(trackID:String,title:String,artist:String,playing:Bool,position:Double,duration:Double) { self.trackID=trackID;self.title=title;self.artist=artist;self.playing=playing;self.position=position;self.duration=duration }
 }
-public enum MediaCommand:String,Sendable { case previous,playPause,next }
+public enum MediaCommand:String,Sendable { case previous,playPause,pause,next }
 public struct MediaState {
  public private(set) var snapshot:MediaSnapshot?
  public private(set) var artworkData:Data?

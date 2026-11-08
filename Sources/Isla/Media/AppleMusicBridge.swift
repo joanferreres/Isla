@@ -28,6 +28,7 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
  case "previous": source="tell application \"Music\" to previous track"
  case "next": source="tell application \"Music\" to next track"
  case "playPause": source="tell application \"Music\" to playpause"
+ case "pause": source="tell application \"Music\" to pause"
  default: source="return {}"
  }
  var error:NSDictionary?

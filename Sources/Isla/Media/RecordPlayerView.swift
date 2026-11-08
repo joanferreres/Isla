@@ -12,6 +12,7 @@ import IslandCore
     @ObservedObject var preferences: PreferencesStore
     @ObservedObject var visibility: RecordPlayerVisibility
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var artwork: NSImage?
 
     private let ink = RecordPlayerPalette.ink
@@ -19,30 +20,20 @@ import IslandCore
 
     var body: some View {
         GeometryReader { proxy in
-            let wide = proxy.size.width >= 820
-            let margin = min(64, max(22, proxy.size.width * 0.045))
-            let width = proxy.size.width - 2 * margin
-            let height = proxy.size.height - 2 * margin
-            let diameter = max(150, min(660, wide
-                ? min(width * 0.54 / 1.13, height)
-                : min(width / 1.13, height - 210)))
+            let diameter = max(120, min(660, (proxy.size.width - 48) / 1.28, proxy.size.height - 246))
             let snapshot = music.state.snapshot
             let ticking = visibility.isVisible && snapshot?.playing == true
             let spinning = ticking && !reduceMotion
-            Group {
-                if wide {
-                    HStack(spacing: min(64, width * 0.055)) {
-                        turntable(diameter: diameter, snapshot: snapshot, ticking: ticking, spinning: spinning)
-                        information(snapshot, wide: true, ticking: ticking)
-                    }
-                } else {
-                    VStack(spacing: 18) {
-                        turntable(diameter: diameter, snapshot: snapshot, ticking: ticking, spinning: spinning)
-                        information(snapshot, wide: false, ticking: ticking)
-                    }
+            ZStack {
+                turntable(diameter: diameter, snapshot: snapshot, ticking: ticking, spinning: spinning)
+                VStack {
+                    trackHeading(snapshot)
+                    Spacer(minLength: 0)
+                    playbackBar(snapshot, ticking: ticking)
                 }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 14)
             }
-            .frame(width: width, height: height)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .foregroundStyle(ink)
@@ -59,24 +50,28 @@ import IslandCore
             let elapsed = playbackSeconds(snapshot, at: context.date)
             let duration = snapshot?.duration ?? 0
             let progress = duration > 0 ? min(1, elapsed / duration) : 0
-            let phase = elapsed.truncatingRemainder(dividingBy: 1.8) * 200
-            ZStack(alignment: .leading) {
-                VinylRecord(artwork: artwork, accent: accent)
-                    .frame(width: diameter, height: diameter)
-                    .rotationEffect(.degrees(reduceMotion ? 0 : phase))
-                    .background {
-                        if spinning {
-                            RecordSoundWaves(diameter: diameter, elapsed: elapsed, accent: accent)
-                                .frame(width: diameter * 1.22, height: diameter * 1.22)
-                                .allowsHitTesting(false)
-                        }
+            let phase = elapsed.truncatingRemainder(dividingBy: 3.6) * 100
+            let playing = snapshot?.playing == true
+            VinylRecord(artwork: artwork, accent: accent)
+                .frame(width: diameter, height: diameter)
+                .rotationEffect(.degrees(reduceMotion ? 0 : phase))
+                .background {
+                    if spinning {
+                        RecordSoundWaves(diameter: diameter, elapsed: elapsed, accent: accent)
+                            .frame(width: diameter * 1.22, height: diameter * 1.22)
+                            .allowsHitTesting(false)
                     }
-                Tonearm(angle: snapshot == nil ? 0 : 18 + 24 * progress, accent: accent)
+                }
+                .accessibilityHidden(true)
+                .overlay(alignment: .topLeading) {
+                    Tonearm(angle: playing ? 18 + 24 * progress : 0, playing: playing, accent: accent) {
+                        music.send(.pause)
+                    }
                     .frame(width: width, height: diameter)
-            }
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.34), value: playing)
+                }
         }
-        .frame(width: width, height: diameter)
-        .accessibilityHidden(true)
+        .frame(width: diameter, height: diameter)
     }
 
     private func playbackSeconds(_ snapshot: MediaSnapshot?, at date: Date) -> Double {
@@ -85,43 +80,46 @@ import IslandCore
         return max(0, snapshot.position + running)
     }
 
-    private func information(_ snapshot: MediaSnapshot?, wide: Bool, ticking: Bool) -> some View {
-        VStack(alignment: wide ? .leading : .center, spacing: wide ? 16 : 8) {
+    private func trackHeading(_ snapshot: MediaSnapshot?) -> some View {
+        VStack(spacing: 4) {
             Label("Apple Music", systemImage: "music.note")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(accent)
-            VStack(alignment: wide ? .leading : .center, spacing: 5) {
-                Text(snapshot?.title ?? "Sin música")
-                    .font(.system(size: wide ? 44 : 26, weight: .medium, design: .serif))
-                    .lineLimit(wide ? 3 : 1)
-                    .minimumScaleFactor(0.75)
-                    .accessibilityAddTraits(.isHeader)
-                if let snapshot, !snapshot.artist.isEmpty {
-                    Text(snapshot.artist).font(.system(size: wide ? 18 : 14))
-                        .foregroundStyle(ink.opacity(0.72)).lineLimit(1)
-                }
+            Text(snapshot?.title ?? "Sin música")
+                .font(.system(.largeTitle, design: .serif).weight(.medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .accessibilityAddTraits(.isHeader)
+            if let snapshot, !snapshot.artist.isEmpty {
+                Text(snapshot.artist).font(.subheadline)
+                    .foregroundStyle(ink.opacity(0.72)).lineLimit(1)
             }
+        }
+        .frame(maxWidth: 540)
+        .allowsHitTesting(false)
+    }
+
+    private func playbackBar(_ snapshot: MediaSnapshot?, ticking: Bool) -> some View {
+        let controls = VStack(spacing: 5) {
             if let snapshot {
+                transport(playing: snapshot.playing)
                 if snapshot.duration > 0 {
                     TimelineView(.animation(minimumInterval: 1, paused: !ticking)) { context in
                         let elapsed = music.displayPosition(at: context.date)
-                        VStack(spacing: 5) {
+                        HStack(spacing: 10) {
+                            Text(clock(elapsed))
                             ProgressView(value: elapsed, total: snapshot.duration)
                                 .tint(accent)
                                 .accessibilityLabel("Progreso de reproducción")
-                            HStack {
-                                Text(clock(elapsed)); Spacer(); Text(clock(snapshot.duration))
-                            }
-                            .font(.caption.monospacedDigit()).foregroundStyle(ink.opacity(0.68))
+                            Text(clock(snapshot.duration))
                         }
+                        .font(.caption.monospacedDigit()).foregroundStyle(ink.opacity(0.72))
                     }
-                    .frame(maxWidth: wide ? .infinity : 350)
                 }
-                transport(playing: snapshot.playing)
             } else {
                 Text(preferences.value.musicEnabled ? "Reproduce una canción en Música." : "Conecta Apple Music para ver la canción y la carátula.")
                     .font(.callout).foregroundStyle(ink.opacity(0.72))
-                    .multilineTextAlignment(wide ? .leading : .center)
+                    .multilineTextAlignment(.center)
                 if preferences.value.musicEnabled {
                     Button("Abrir Música") {
                         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Music") {
@@ -136,7 +134,21 @@ import IslandCore
                 Text(error).font(.caption).foregroundStyle(accent).lineLimit(2)
             }
         }
-        .frame(maxWidth: .infinity, alignment: wide ? .leading : .center)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 10)
+        .frame(maxWidth: 460)
+        return playbackMaterial(controls)
+    }
+
+    @ViewBuilder private func playbackMaterial<Content: View>(_ content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 24)
+        if reduceTransparency {
+            content.background(Color(white: 0.15), in: shape)
+        } else if #available(macOS 26.0, *) {
+            content.glassEffect(.regular.tint(accent.opacity(0.14)), in: shape)
+        } else {
+            content.background(.regularMaterial, in: shape)
+        }
     }
 
     private func transport(playing: Bool) -> some View {
@@ -233,7 +245,9 @@ private struct VinylRecord: View {
 
 private struct Tonearm: View {
     let angle: Double
+    let playing: Bool
     let accent: Color
+    let lift: () -> Void
 
     var body: some View {
         Canvas { context, size in
@@ -256,6 +270,22 @@ private struct Tonearm: View {
             let cartridge = CGRect(x: tip.x - d * 0.015, y: tip.y - d * 0.038, width: d * 0.03, height: d * 0.046)
             context.fill(Path(roundedRect: cartridge, cornerRadius: d * 0.004), with: .color(metal))
             context.fill(circle(tip, d * 0.007), with: .color(accent))
+        }
+        .accessibilityHidden(true)
+        .overlay {
+            if playing {
+                GeometryReader { proxy in
+                    let d = proxy.size.height
+                    Button(action: lift) {
+                        Color.clear.frame(width: 44, height: 44).contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Levantar la aguja y pausar")
+                    .help("Pulsa o arrastra para levantar la aguja")
+                    .simultaneousGesture(DragGesture(minimumDistance: 6).onEnded { _ in lift() })
+                    .position(x: d * 1.008, y: d * 0.865)
+                }
+            }
         }
         .rotationEffect(.degrees(angle), anchor: UnitPoint(x: 1.025 / 1.13, y: 0.145))
     }
