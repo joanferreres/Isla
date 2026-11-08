@@ -36,7 +36,7 @@ import SwiftUI
         window.collectionBehavior = [.fullScreenPrimary, .managed]
         window.appearance = NSAppearance(named: .darkAqua)
         window.titlebarAppearsTransparent = true
-        window.backgroundColor = NSColor(srgbRed: 0.085, green: 0.077, blue: 0.067, alpha: 1)
+        window.backgroundColor = RecordPlayerPalette.background
         window.delegate = self
         window.contentView = NSHostingView(rootView: RecordPlayerView(
             music: music, preferences: preferences, visibility: visibility
