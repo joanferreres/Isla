@@ -15,9 +15,9 @@ import IslandCore
  var pointerInside = false
  private var interactionHolds = 0
  private var pending: Task<Void, Never>?
- func updateHover(_ inside:Bool,openOnHover:Bool) {
+ func updatePointerPresence(_ inside:Bool) {
  pointerInside=inside
- if inside { pending?.cancel();if openOnHover { enter() } } else { leave() }
+ if inside { pending?.cancel() } else { leave() }
  }
  func enter() { pending?.cancel(); state.enter() }
  func leave() { guard interactionHolds == 0 else { return }; pending?.cancel(); pending=Task { try? await Task.sleep(for:.milliseconds(250)); guard !Task.isCancelled,interactionHolds == 0 else { return }; state.leave() } }
@@ -79,16 +79,13 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  panel.level = NSWindow.Level(rawValue:NSWindow.Level.mainMenu.rawValue-1); panel.hidesOnDeactivate=false; panel.collectionBehavior=[.canJoinAllSpaces,.canJoinAllApplications,.fullScreenAuxiliary,.stationary]; panel.isMovable=false
  panel.contentView=IslandHostingView(rootView:IslandView(model:model,preferences:preferences,local:local,music:music,calendar:calendar,activity:activity,usage:usage,statistics:statistics,settings:settings))
  preferences.$value.map{$0.normalized().expandedWidth}.removeDuplicates().dropFirst().sink { [weak self] _ in DispatchQueue.main.async { self?.refreshGeometry() } }.store(in:&subscriptions)
- preferences.$value.map(\.openOnHover).removeDuplicates().dropFirst().sink { [weak self] _ in
- DispatchQueue.main.async { guard let self else { return };self.model.pointerInside=false;self.updatePointer() }
- }.store(in:&subscriptions)
  if let monitor=NSEvent.addGlobalMonitorForEvents(matching:[.mouseMoved,.leftMouseDragged,.rightMouseDragged,.leftMouseDown,.rightMouseDown]) { [weak self] event in
  guard let self else { return };self.updatePointer()
  // Global monitors only receive events delivered to other apps. Recover a click
- // inside or below the camera if the system menu bar took the click.
+ // inside the camera housing if the system menu bar took the click.
  if (event.type == .leftMouseDown && !self.model.state.expanded) || event.type == .rightMouseDown,let layout=self.layout {
  let point=NSEvent.mouseLocation
- if layout.containsGlobalActivation(point,physicalNotch:self.model.hasPhysicalNotch,sideWidth:self.model.sideWidth) {
+ if layout.containsGlobalActivation(point,physicalNotch:self.model.hasPhysicalNotch) {
  if event.type == .rightMouseDown { self.scheduleContextMenu(at:point) } else { self.model.enter() }
  }
  }
@@ -98,11 +95,11 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  if event.type == .rightMouseDown,event.window === self.panel,!self.model.state.expanded,
  let layout=self.layout {
  let point=self.panel.convertPoint(toScreen:event.locationInWindow)
- if layout.containsCompactClick(point,sideWidth:self.model.sideWidth) { self.scheduleContextMenu(at:point);return nil }
+ if layout.containsCompactClick(point) { self.scheduleContextMenu(at:point);return nil }
  }
  // Handle the first primary click before SwiftUI's context-menu recognizer or first-mouse filtering.
  if event.type == .leftMouseDown,event.window === self.panel,!self.model.state.expanded,
- let layout=self.layout,layout.containsCompactClick(self.panel.convertPoint(toScreen:event.locationInWindow),sideWidth:self.model.sideWidth) {
+ let layout=self.layout,layout.containsCompactClick(self.panel.convertPoint(toScreen:event.locationInWindow)) {
  self.model.enter();return nil
  }
  return event
@@ -168,10 +165,8 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  let cx=p.x < frame.midX ? frame.minX+radius : frame.maxX-radius
  if p.x < frame.minX+radius || p.x > frame.maxX-radius { inside=hypot(p.x-cx,p.y-(frame.minY+radius)) <= radius }
  }
- if !model.state.expanded,layout.containsCompactClick(p,sideWidth:model.sideWidth) { inside=true }
- // The compact native window is exactly the activation strip, so it receives both clicks without a prior mouse move.
- panel.ignoresMouseEvents = !model.state.expanded && panel.frame == layout.windowFrame(expanded:false,sideWidth:model.sideWidth) ? false : !inside
+ panel.ignoresMouseEvents = model.state.expanded ? !inside : !layout.containsCompactClick(p)
  let hoverInside=layout.containsHover(p,expanded:model.state.expanded,sideWidth:model.sideWidth)
- if hoverInside != model.pointerInside { model.updateHover(hoverInside,openOnHover:preferences.value.openOnHover) }
+ if hoverInside != model.pointerInside { model.updatePointerPresence(hoverInside) }
  }
 }

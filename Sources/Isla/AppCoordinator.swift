@@ -24,7 +24,6 @@ import IslandCore
  func applicationDidFinishLaunching(_ notification: Notification) {
  if !UserDefaults.standard.bool(forKey:"compactClickLayoutApplied") {
  if preferences.value.expandedWidth == 600 { preferences.value.expandedWidth=640 }
- preferences.value.openOnHover=false
  UserDefaults.standard.set(true,forKey:"compactClickLayoutApplied")
  }
  activity.onCompletion = { [weak self] event in self?.statistics.record(event) }

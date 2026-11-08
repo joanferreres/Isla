@@ -74,9 +74,6 @@ import IslandCore
  .animation(reduced ? .easeOut(duration:0.15) : .spring(response:0.35,dampingFraction:0.9),value:model.compactSize)
  .animation(reduced ? .easeOut(duration:0.15) : .spring(response:expanded ? 0.38 : 0.32,dampingFraction:expanded ? 0.8 : 0.9),value:expanded)
  .frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.top)
- // WindowServer passes fully transparent pixels through to the app underneath.
- // Paint the compact activation strip, including the area below the camera.
- .background(expanded ? Color.clear : Color.black.opacity(0.01))
  .preferredColorScheme(.dark)
  .contentShape(Rectangle())
  .contextMenu {
@@ -91,7 +88,10 @@ import IslandCore
  }
  .onChange(of:section) { _,value in model.trayMode = value == "Archivos" }
  .onExitCommand { model.close() }
- .onDrop(of:[UTType.fileURL],isTargeted:$dragging) { providers in section="Archivos"; model.enter(); return ShelfService.accept(providers,into:local) }
- .onChange(of:dragging) { _,active in if active { section="Archivos"; model.enter() } }
+ .onDrop(of:expanded ? [UTType.fileURL] : [],isTargeted:$dragging) { providers in
+ guard model.state.expanded else { return false }
+ section="Archivos";return ShelfService.accept(providers,into:local)
+ }
+ .onChange(of:dragging) { _,active in if active && model.state.expanded { section="Archivos" } }
  }
 }

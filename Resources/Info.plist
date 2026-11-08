@@ -6,8 +6,8 @@
 <key>CFBundleIconFile</key><string>Isla</string>
 <key>CFBundleName</key><string>Isla</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.8.11</string>
-<key>CFBundleVersion</key><string>41</string>
+<key>CFBundleShortVersionString</key><string>0.8.12</string>
+<key>CFBundleVersion</key><string>42</string>
 <key>LSUIElement</key><true/>
 <key>LSMinimumSystemVersion</key><string>15.0</string>
 <key>NSHighResolutionCapable</key><true/>
