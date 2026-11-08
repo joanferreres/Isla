@@ -99,11 +99,11 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  if event.type == .rightMouseDown,event.window === self.panel,!self.model.state.expanded,
  let layout=self.layout {
  let point=self.panel.convertPoint(toScreen:event.locationInWindow)
- if layout.containsHover(point,expanded:false,sideWidth:self.model.sideWidth) { self.scheduleContextMenu(at:point);return nil }
+ if layout.containsCompactClick(point,sideWidth:self.model.sideWidth) { self.scheduleContextMenu(at:point);return nil }
  }
  // Handle the first primary click before SwiftUI's context-menu recognizer or first-mouse filtering.
  if event.type == .leftMouseDown,event.window === self.panel,!self.model.state.expanded,
- let layout=self.layout,layout.containsHover(self.panel.convertPoint(toScreen:event.locationInWindow),expanded:false,sideWidth:self.model.sideWidth) {
+ let layout=self.layout,layout.containsCompactClick(self.panel.convertPoint(toScreen:event.locationInWindow),sideWidth:self.model.sideWidth) {
  self.model.enter();return nil
  }
  return event
@@ -169,7 +169,7 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  let cx=p.x < frame.midX ? frame.minX+radius : frame.maxX-radius
  if p.x < frame.minX+radius || p.x > frame.maxX-radius { inside=hypot(p.x-cx,p.y-(frame.minY+radius)) <= radius }
  }
- if !model.state.expanded,layout.containsHover(p,expanded:false,sideWidth:model.sideWidth) { inside=true }
+ if !model.state.expanded,layout.containsCompactClick(p,sideWidth:model.sideWidth) { inside=true }
  // The compact native window is exactly the activation strip, so it receives both clicks without a prior mouse move.
  panel.ignoresMouseEvents = !model.state.expanded && panel.frame == layout.windowFrame(expanded:false,sideWidth:model.sideWidth) ? false : !inside
  let hoverInside=layout.containsHover(p,expanded:model.state.expanded,sideWidth:model.sideWidth)

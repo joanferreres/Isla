@@ -1,11 +1,12 @@
 import XCTest
 @testable import IslandCore
 final class DisplayLayoutTests: XCTestCase {
- func testHoverOpensAtTopEdgeAndBelowPhysicalNotchWithoutMusic() {
+ func testHoverStaysWithinTheVisibleNotchAndMediaWings() {
  let layout=IslandLayout(metrics:DisplayMetrics(id:1,frame:CGRect(x:0,y:0,width:1800,height:1169),notchWidth:220,headerHeight:38,builtIn:true),expandedWidth:600,expandedHeight:260)
  XCTAssertTrue(layout.containsHover(CGPoint(x:900,y:1169),expanded:false,sideWidth:0))
- XCTAssertTrue(layout.containsHover(CGPoint(x:900,y:1127),expanded:false,sideWidth:0))
- XCTAssertTrue(layout.containsHover(CGPoint(x:775,y:1150),expanded:false,sideWidth:0))
+ XCTAssertFalse(layout.containsHover(CGPoint(x:900,y:1127),expanded:false,sideWidth:0))
+ XCTAssertFalse(layout.containsHover(CGPoint(x:775,y:1150),expanded:false,sideWidth:0))
+ XCTAssertTrue(layout.containsHover(CGPoint(x:775,y:1150),expanded:false,sideWidth:36))
  XCTAssertFalse(layout.containsHover(CGPoint(x:600,y:1150),expanded:false,sideWidth:0))
  XCTAssertEqual(layout.visibleFrame(expanded:false,sideWidth:0).width,220)
  }
