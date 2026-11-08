@@ -20,7 +20,7 @@ import IslandCore
 
     var body: some View {
         GeometryReader { proxy in
-            let diameter = max(120, min(660, (proxy.size.width - 48) / 1.28, proxy.size.height - 246))
+            let diameter = max(120, min(660, (proxy.size.width - 48) / 1.28, (proxy.size.height - 176) / 1.22))
             let snapshot = music.state.snapshot
             let ticking = visibility.isVisible && snapshot?.playing == true
             let spinning = ticking && !reduceMotion
@@ -100,7 +100,7 @@ import IslandCore
     }
 
     private func playbackBar(_ snapshot: MediaSnapshot?, ticking: Bool) -> some View {
-        let controls = VStack(spacing: 5) {
+        let controls = HStack(spacing: 16) {
             if let snapshot {
                 transport(playing: snapshot.playing)
                 if snapshot.duration > 0 {
@@ -119,7 +119,7 @@ import IslandCore
             } else {
                 Text(preferences.value.musicEnabled ? "Reproduce una canción en Música." : "Conecta Apple Music para ver la canción y la carátula.")
                     .font(.callout).foregroundStyle(ink.opacity(0.72))
-                    .multilineTextAlignment(.center)
+                    .multilineTextAlignment(.leading)
                 if preferences.value.musicEnabled {
                     Button("Abrir Música") {
                         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Music") {
@@ -130,38 +130,39 @@ import IslandCore
                     Button("Conectar Apple Music") { preferences.value.musicEnabled = true }
                 }
             }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 6)
+        .frame(maxWidth: 560)
+        return VStack(spacing: 5) {
             if let error = music.error {
                 Text(error).font(.caption).foregroundStyle(accent).lineLimit(2)
             }
+            playbackMaterial(controls)
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 10)
-        .frame(maxWidth: 460)
-        return playbackMaterial(controls)
     }
 
     @ViewBuilder private func playbackMaterial<Content: View>(_ content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 24)
+        let shape = Capsule()
         if reduceTransparency {
             content.background(Color(white: 0.15), in: shape)
         } else if #available(macOS 26.0, *) {
-            content.glassEffect(.regular.tint(accent.opacity(0.14)), in: shape)
+            content.glassEffect(.clear, in: shape)
         } else {
             content.background(.regularMaterial, in: shape)
         }
     }
 
     private func transport(playing: Bool) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 2) {
             Button { music.send(.previous) } label: {
                 Image(systemName: "backward.end.fill").frame(width: 44, height: 44)
             }.accessibilityLabel("Canción anterior")
             Button { music.send(.playPause) } label: {
                 Image(systemName: playing ? "pause.fill" : "play.fill")
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Color.black)
-                    .frame(width: 50, height: 50)
-                    .background(accent, in: Circle())
+                    .foregroundStyle(accent)
+                    .frame(width: 44, height: 44)
             }.accessibilityLabel(playing ? "Pausar" : "Reproducir")
             Button { music.send(.next) } label: {
                 Image(systemName: "forward.end.fill").frame(width: 44, height: 44)
