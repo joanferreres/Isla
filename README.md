@@ -2,57 +2,132 @@
 
 <img src="Resources/Isla-icon.png" width="96" alt="Icono de Isla">
 
-Una isla dinámica para el notch del Mac, hecha con SwiftUI y AppKit. Proyecto personal y experimental.
+Isla convierte el notch del Mac en un espacio compacto para música, calendario, actividad de IA y archivos. Está hecha con SwiftUI y AppKit para macOS.
 
-**[Descargar Isla.zip](https://github.com/joanferreres/Isla/releases/latest/download/Isla.zip)** · **[Manual de instalación](docs/INSTALACION.md)** · **[Solución de problemas](docs/PROBLEMAS.md)** · **[Compilar desde el código](docs/COMPILAR.md)**
+**[Descargar Isla.zip](https://github.com/joanferreres/Isla/releases/latest/download/Isla.zip)** · **[Instalación](docs/INSTALACION.md)** · **[Solución de problemas](docs/PROBLEMAS.md)** · **[Compilar](docs/COMPILAR.md)**
+
+## Funciones
+
+### Isla dinámica
+
+- Se abre al hacer clic dentro del notch, sin activarse al acercar el puntero.
+- Muestra la carátula y los controles cuando Apple Music está reproduciendo.
+- Oculta los laterales de música cuando no hay reproducción.
+- Divide el espacio entre música, calendario y actividad de IA según el contenido disponible.
+- Puede fijarse abierta y mostrarse en la pantalla principal o en todos los monitores.
+- El menú secundario permite cambiar el modo de avisos, fijar la isla, abrir Ajustes o salir.
+
+### Apple Music y tocadiscos
+
+- Carátula, canción, artista, reproducción, pausa, pista anterior y pista siguiente.
+- Ventana de tocadiscos redimensionable y compatible con pantalla completa.
+- Vinilo animado, ondas musicales y brazo móvil. Arrastrar el brazo cambia la posición de la canción.
+- Deslizar el disco con dos dedos en el trackpad cambia de pista.
+- Mesa de DJ con volumen y controles de graves, medios y agudos, además de un botón para restablecer el sonido.
+- Diez ambientes visuales, seleccionables con <kbd>⌘0</kbd> a <kbd>⌘9</kbd>.
+- Selector para añadir la canción actual a una playlist editable de Apple Music.
+- Indicador discreto de batería cuando el altavoz Bluetooth conectado publica ese dato.
+- Reproductor compacto opcional sobre el escritorio, activable desde el menú de Isla.
+- Widget nativo de macOS en tamaños pequeño y mediano. Muestra la canción actual y coloca el brazo sobre el disco únicamente durante la reproducción.
+
+### Calendario
+
+- Vista compacta del día y de los próximos eventos.
+- Selección de los calendarios que Isla puede mostrar.
+- Recordatorio alrededor del notch durante los diez minutos anteriores al siguiente evento.
+- El permiso se solicita una vez y puede administrarse después desde Privacidad y seguridad.
+
+### Codex, Cursor y Claude
+
+- Estado y límites disponibles de Codex, Cursor, Claude Code y Claude.
+- Selección de qué servicios aparecen en Inicio.
+- Indicador circular de consumo y estadísticas de actividad.
+- Aviso al terminar una tarea con tres modos: sonido y señal visual, solo señal visual o sin avisos.
+- El modo silencioso evita sonidos de finalización sin desconectar las integraciones.
+
+La información disponible depende de cada servicio, de la sesión local y de los datos que publique su API o aplicación.
+
+### Archivos y AirDrop
+
+- Bandeja temporal con miniaturas para archivos arrastrados desde Finder.
+- Arrastrar un elemento desde la bandeja a otra aplicación.
+- Compartir o enviar por AirDrop desde la propia isla.
+- Los accesos conservan el archivo original en su ubicación.
+
+### Pantalla y tapa
+
+- Isla independiente para la pantalla principal o para todos los monitores.
+- Efecto opcional al cerrar la tapa en MacBook compatibles.
+- La animación sigue el ángulo, retrocede si se vuelve a abrir y desaparece si la tapa queda quieta durante tres segundos.
+- La captura de pantalla se activa durante el gesto y no guarda vídeo.
+
+### Capturas y ajustes
+
+- Opción para guardar capturas en `Escritorio/capturas` y copiarlas al portapapeles.
+- Ajustes separados para General, Música, Calendario, IA y Pantallas.
+- Comprobación manual de nuevas versiones y consulta automática semanal.
 
 ## Requisitos
 
-- Mac con Apple Silicon: M1, M2, M3, M4 o posterior. El ZIP actual no funciona en Intel.
-- macOS 15 o posterior. Probada principalmente en un MacBook Pro M4 con macOS 27; no se ha validado cada versión o modelo.
-- El efecto al cerrar la tapa requiere un MacBook con un sensor compatible. La isla puede colocarse también en monitores externos.
+- Mac con Apple Silicon, desde M1 en adelante. La descarga actual es `arm64` y no funciona en Intel.
+- macOS 15 o posterior.
+- El efecto de tapa requiere un MacBook con sensor compatible.
 
-## Instalación rápida
+Isla se prueba principalmente en un MacBook Pro M4. Algunas integraciones usan interfaces de macOS o de servicios externos que pueden cambiar con futuras versiones.
 
-1. Entra en **[Releases](https://github.com/joanferreres/Isla/releases)** y descarga el archivo **Isla.zip** de la versión más reciente. Los archivos automáticos «Source code» contienen el código, no la aplicación lista para abrir.
-2. Descomprime el ZIP y arrastra **Isla.app** a **Aplicaciones**.
-3. Intenta abrirla. Si macOS muestra un aviso de desarrollador no identificado, sigue el [manual](docs/INSTALACION.md).
-4. Abre los ajustes de Isla y activa únicamente las conexiones que quieras usar.
+## Instalación
 
-No hace falta una suscripción de Apple Developer para compilarla o compartir esta copia. La aplicación tiene firma personal y **no está notarizada por Apple**: GitHub facilita la descarga, pero no evita los avisos de seguridad de macOS. Si recibes «This application can’t be opened», consulta [el diagnóstico](docs/PROBLEMAS.md); no está confirmado que el ZIP abra en todos los Macs compatibles.
+1. Descarga **Isla.zip** desde la [última versión publicada](https://github.com/joanferreres/Isla/releases/latest).
+2. Descomprime el archivo y mueve **Isla.app** a **Aplicaciones**.
+3. Abre Isla. Si macOS no reconoce al desarrollador, sigue el [manual de instalación](docs/INSTALACION.md#primer-aviso-de-macos).
+4. Abre Ajustes y activa únicamente las funciones que quieras usar.
 
-Si el repositorio es privado, el propietario debe invitar a su amigo como colaborador y este debe iniciar sesión en GitHub para acceder a las descargas. También puede enviarle el ZIP directamente.
+La aplicación tiene una firma personal y no está notarizada por Apple. No hace falta desactivar Gatekeeper. macOS permite autorizarla desde **Ajustes del Sistema → Privacidad y seguridad → Abrir igualmente** después de intentar abrirla una vez.
 
-## Qué incluye
+## Permisos
 
-- Clic dentro del notch para abrir la isla; menú secundario con ajustes, fijar y salir.
-- Tocadiscos de Apple Music en una ventana propia: vinilo centrado, ondas azules, aguja arrastrable para cambiar de posición y controles inferiores con Liquid Glass nativo.
-- Carátula y controles de Apple Music, y metadatos multimedia compatibles.
-- Calendario, agenda y recordatorio del siguiente evento durante los diez minutos anteriores.
-- Información de uso de Codex, Cursor y Claude cuando la integración y la sesión lo permiten. Los límites mostrados dependen de los datos que facilite cada servicio.
-- Aviso al terminar tareas de Codex y tres modos: sonido y aviso visual, solo visual o sin avisos.
-- Bandeja de archivos con miniaturas y opciones de compartir y AirDrop.
-- Selección de pantallas y efecto opcional al mover la tapa.
-- Aviso de nuevas versiones publicadas en GitHub, con comprobación semanal y opción manual.
+| Permiso | Para qué se usa |
+| --- | --- |
+| Automatización de Music | Leer la canción y usar los controles de Apple Music. |
+| Calendario | Mostrar eventos de los calendarios seleccionados. |
+| Accesibilidad | Ajustar el ecualizador y algunas acciones de Apple Music. |
+| Grabación de pantalla | Generar el efecto visual durante el movimiento de la tapa. |
+| Carpeta de capturas | Guardar capturas si esta opción está activada. |
+| Lectura del archivo del widget | Compartir con el widget únicamente la canción y la carátula actuales. |
 
-## Primer uso y privacidad
+Isla no incluye cuentas, calendarios, conversaciones, tokens ni claves privadas del autor. Cada instalación utiliza las sesiones y permisos del propietario de ese Mac.
 
-Cada persona configura sus propias cuentas y permisos. El paquete no contiene calendarios, conversaciones, tokens de acceso ni claves privadas de firma del autor. Las conexiones de IA usan las sesiones locales del usuario y pueden consultar los servicios correspondientes. Calendario, Automatización de Music y Grabación de pantalla solo son necesarios para sus funciones respectivas. El efecto de tapa usa una captura durante el gesto; no guarda un vídeo.
+## Widget del tocadiscos
 
-## Estado del proyecto
+1. Haz clic secundario en el escritorio y abre **Editar widgets**.
+2. Busca **Isla**.
+3. Arrastra **Tocadiscos** al escritorio en tamaño pequeño o mediano.
 
-Versión actual: **0.8.24**. Hay 123 pruebas automatizadas, pero estas no sustituyen la comprobación en otros Macs. Los clics dentro del notch físico requieren validación con entrada física en el equipo de destino. El mensaje de apertura recibido en el Mac de un amigo sigue pendiente de diagnóstico.
-
-Las integraciones multimedia, el sensor de tapa y algunos datos de IA usan interfaces que pueden cambiar entre versiones. Las consultas de límites no representan una garantía de crédito disponible.
+El widget se actualiza cuando cambia la canción, al reproducir o pausar y después de instalar una nueva versión. Al pulsarlo abre el tocadiscos completo.
 
 ## Actualizaciones
 
-Desde **Isla 0.8.9**, la app consulta las releases de este repositorio una vez por semana. La versión 0.8.8 hacía una comprobación diaria. Si hay una versión estable superior con el archivo `Isla.zip`, muestra un aviso con **Descargar actualización** y **Más tarde**, además de un indicador en el icono de la barra de menús. No instala ni sustituye archivos sin intervención del usuario.
+Isla consulta la última release pública una vez por semana. También puedes usar **Buscar actualizaciones…** desde el menú de Isla o desde **Ajustes → General → Actualizaciones**.
 
-La opción **Buscar actualizaciones…** está en el menú de Isla y en **Ajustes → General → Actualizaciones**. Puedes desactivar la consulta automática. No necesita cuentas de GitHub ni permisos de notificaciones. El modo luna sin avisos evita el diálogo automático; la actualización sigue accesible en el menú y en Ajustes.
+Cuando existe una versión superior con un archivo adjunto llamado `Isla.zip`, Isla muestra un aviso y abre la descarga de GitHub. La sustitución de la aplicación sigue siendo manual:
 
-**Quienes tengan 0.8.7 o anterior deben instalar la versión actual manualmente una vez** para incorporar esta función. Subir cambios a `main` no genera una actualización: hay que aumentar la versión, compilar y publicar una nueva release con `Isla.zip`. Consulta [el procedimiento](docs/COMPILAR.md#publicar-una-nueva-versión).
+1. Sal de Isla.
+2. Descarga y descomprime la nueva versión.
+3. Sustituye **Isla.app** dentro de **Aplicaciones**.
+4. Abre Isla de nuevo.
 
-## Desarrollo y créditos
+La aplicación reinicia su extensión del widget después de una actualización para evitar que macOS conserve la canción de la versión anterior.
 
-Consulta [cómo compilar, probar y preparar una versión](docs/COMPILAR.md). Las referencias, adaptaciones y licencias de terceros se conservan en [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) y [Vendor/MediaRemoteAdapter/LICENSE](Vendor/MediaRemoteAdapter/LICENSE). Isla es un proyecto independiente de las aplicaciones y proveedores mencionados.
+Las versiones 0.8.7 o anteriores necesitan una actualización manual inicial. Un commit nuevo en `main` no activa avisos por sí solo. Debe existir una release estable con una versión superior y el archivo **Isla.zip**.
+
+## Versión actual
+
+**Isla 0.8.41**, compilación 71.
+
+El proyecto cuenta con 128 pruebas automatizadas. La compatibilidad física del notch, los sensores y algunos permisos todavía puede variar entre modelos y versiones de macOS.
+
+## Desarrollo
+
+Consulta [COMPILAR.md](docs/COMPILAR.md) para compilar, ejecutar las pruebas y preparar una release. Las licencias y adaptaciones de terceros están en [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) y [Vendor/MediaRemoteAdapter/LICENSE](Vendor/MediaRemoteAdapter/LICENSE).
+
+Isla es un proyecto independiente de Apple, OpenAI, Anthropic, Cursor y las aplicaciones o servicios mencionados.

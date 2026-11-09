@@ -10,52 +10,51 @@ struct RecordPlayerMixer: View {
     @State private var gains: [MixerBand: Double] = [:]
     @State private var eqFailure: MusicEqualizer.Failure?
     @State private var changingEQ = false
-    @State private var showSetup = false
+    @State private var showAccess = false
+    @State private var offeredAccess = false
     @State private var volume: Int?
     @State private var confirmedVolume: Int?
     @State private var volumeRequest: Int?
     @State private var volumeError: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Mezclador", systemImage: "slider.vertical.3")
-                .font(.headline)
-                .accessibilityAddTraits(.isHeader)
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
+            resetButton
+            HStack(spacing: 15) {
                 VStack(spacing: 7) {
                     ForEach(MixerBand.allCases, id: \.self) { band in
                         EQKnob(title: band.title, gain: gains[band], accent: palette.accent) { value in
                             adjust(value, band: band)
                         }
-                        .disabled(changingEQ || eqFailure != nil)
+                        .disabled(!active || changingEQ)
                     }
                 }
-                Divider()
                 volumeFader
             }
             .fixedSize(horizontal: false, vertical: true)
-            if let eqFailure {
-                setupButton(eqFailure)
-            }
             if let volumeError {
                 Text(volumeError).font(.caption2).foregroundStyle(.secondary)
             }
         }
-        .padding(14)
-        .background {
-            let shape = RoundedRectangle(cornerRadius: 20)
-            if reduceTransparency {
-                shape.fill(Color(nsColor: palette.background)).strokeBorder(.white.opacity(0.24))
-            } else if #available(macOS 26.0, *) {
-                Color.clear.glassEffect(.regular, in: shape)
-            } else {
-                shape.fill(.regularMaterial)
+        .padding(.horizontal, 10)
+        .help(eqFailure?.localizedDescription ?? "")
+        .alert("Controlar el ecualizador de Música", isPresented: $showAccess) {
+            Button("Abrir Accesibilidad") {
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+                    NSWorkspace.shared.open(url)
+                }
             }
+            Button("Ahora no", role: .cancel) {}
+        } message: {
+            Text(MusicEqualizer.Failure.access.localizedDescription)
         }
         .task(id: active) {
             guard active else { return }
             await readVolume()
-            await readEQ()
+            if let current = try? await equalizer.read(), !Task.isCancelled, !changingEQ {
+                gains = current
+                eqFailure = nil
+            }
         }
         .task(id: volumeRequest) {
             guard let target = volumeRequest else { return }
@@ -77,41 +76,70 @@ struct RecordPlayerMixer: View {
         }
     }
 
+    @ViewBuilder private var resetButton: some View {
+        let button = Button {
+            let neutral = Dictionary(uniqueKeysWithValues: MixerBand.allCases.map { ($0, 0.0) })
+            applyEQ(preview: neutral) { try await equalizer.reset() }
+        } label: {
+            Image(systemName: "arrow.counterclockwise")
+                .font(.caption.weight(.medium))
+                .frame(width: 20, height: 18)
+        }
+        .controlSize(.small)
+        .buttonBorderShape(.capsule)
+        .accessibilityLabel("Restablecer ecualizador")
+        .help("Poner graves, medios y agudos a cero")
+        .disabled(!active || changingEQ)
+        .padding(.leading, 9)
+        if #available(macOS 26.0, *), !reduceTransparency {
+            button.buttonStyle(.glass)
+        } else {
+            button.buttonStyle(.bordered)
+        }
+    }
+
     private var volumeFader: some View {
         VStack(spacing: 4) {
-            Image(systemName: "speaker.wave.2").font(.caption)
+            Text("VOL").font(.caption2.weight(.semibold)).tracking(0.7).foregroundStyle(.secondary)
             GeometryReader { proxy in
-                let travel = max(1, proxy.size.height - 20)
+                let inset = 15.0
+                let travel = max(1, proxy.size.height - 2 * inset)
                 let level = Double(volume ?? 0) / 100
                 ZStack {
                     VStack {
                         ForEach(0..<9) { index in
                             Capsule().fill(.secondary.opacity(0.45))
-                                .frame(width: index.isMultiple(of: 4) ? 32 : 22, height: 1)
+                                .frame(width: index.isMultiple(of: 4) ? 46 : 30, height: 1)
                             if index < 8 { Spacer(minLength: 0) }
                         }
                     }
-                    .padding(.vertical, 10)
-                    Capsule().fill(.black.opacity(0.75)).frame(width: 6)
-                    Capsule().fill(palette.accent.opacity(0.7))
-                        .frame(width: 4, height: travel * level)
-                        .frame(maxHeight: .infinity, alignment: .bottom)
-                        .padding(.bottom, 10)
-                    RoundedRectangle(cornerRadius: 4)
+                    .padding(.vertical, inset)
+                    Capsule().fill(.black.opacity(0.85))
+                        .strokeBorder(palette.metal.opacity(0.3), lineWidth: 1)
+                        .frame(width: 9)
+                    RoundedRectangle(cornerRadius: 3)
                         .fill(.linearGradient(colors: [palette.metal, palette.vinyl], startPoint: .top, endPoint: .bottom))
-                        .overlay(Capsule().fill(palette.ink).frame(width: 22, height: 1))
-                        .frame(width: 32, height: 18)
-                        .position(x: proxy.size.width / 2, y: 10 + travel * (1 - level))
+                        .strokeBorder(palette.metal.opacity(0.6), lineWidth: 1)
+                        .overlay {
+                            VStack(spacing: 2) {
+                                Capsule().fill(.black.opacity(0.55))
+                                Capsule().fill(palette.ink.opacity(0.85))
+                                Capsule().fill(.black.opacity(0.55))
+                            }.frame(width: 34, height: 10)
+                        }
+                        .shadow(color: .black.opacity(0.45), radius: 2, y: 2)
+                        .frame(width: 47, height: 26)
+                        .position(x: proxy.size.width / 2, y: inset + travel * (1 - level))
                 }
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
-                    setVolume(Int((100 * (1 - (drag.location.y - 10) / travel)).rounded()))
+                    setVolume(Int((100 * (1 - (drag.location.y - inset) / travel)).rounded()))
                 })
             }
-            .frame(width: 44, height: 118)
+            .frame(width: 56, height: 178)
             .opacity(volume == nil ? 0.45 : 1)
             .allowsHitTesting(active && volume != nil)
-            Text(volume.map { "\($0) %" } ?? "—")
+            Text(volume.map { "\($0) %" } ?? "·")
                 .font(.caption2.monospacedDigit())
         }
         .accessibilityElement(children: .ignore)
@@ -125,45 +153,6 @@ struct RecordPlayerMixer: View {
             @unknown default: break
             }
         }
-    }
-
-    @ViewBuilder private func setupButton(_ failure: MusicEqualizer.Failure) -> some View {
-        let button = Button("Configurar EQ", systemImage: "slider.horizontal.3") {
-            Task {
-                await readEQ()
-                showSetup = eqFailure != nil
-            }
-        }
-        if #available(macOS 26.0, *), !reduceTransparency {
-            button.buttonStyle(.glass).popover(isPresented: $showSetup) { setup(failure) }
-        } else {
-            button.buttonStyle(.bordered).popover(isPresented: $showSetup) { setup(failure) }
-        }
-    }
-
-    private func setup(_ failure: MusicEqualizer.Failure) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Ecualizador de Música").font(.headline)
-            Text(failure.localizedDescription).font(.callout)
-            if failure == .access {
-                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-                    Link("Abrir Accesibilidad", destination: url)
-                }
-            } else if failure == .closed {
-                Button("Abrir Música") {
-                    guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Music") else { return }
-                    NSWorkspace.shared.openApplication(at: url, configuration: .init()) { _, _ in }
-                }
-            }
-            Button("Comprobar") {
-                Task {
-                    await readEQ()
-                    showSetup = eqFailure != nil
-                }
-            }
-        }
-        .padding(16)
-        .frame(width: 255, alignment: .leading)
     }
 
     private func readVolume() async {
@@ -186,28 +175,33 @@ struct RecordPlayerMixer: View {
         volumeRequest = target
     }
 
-    private func readEQ() async {
-        do {
-            gains = try await equalizer.read()
-            eqFailure = nil
-        } catch {
-            eqFailure = (error as? MusicEqualizer.Failure) ?? .unresponsive
+    private func adjust(_ adjustment: MusicEqualizer.Adjustment, band: MixerBand) {
+        var preview = gains
+        switch adjustment {
+        case .relative(let delta): preview[band] = min(12, max(-12, (gains[band] ?? 0) + delta))
+        case .reset: preview[band] = 0
         }
+        applyEQ(preview: preview) { try await equalizer.adjust(adjustment, for: band) }
     }
 
-    private func adjust(_ gain: Double, band: MixerBand) {
-        guard !changingEQ else { return }
-        let previous = gains[band]
-        gains[band] = gain
+    private func applyEQ(preview: [MixerBand: Double], operation: @escaping () async throws -> [MixerBand: Double]) {
+        guard active, !changingEQ else { return }
+        let confirmed = gains
+        gains = preview
         changingEQ = true
         Task {
             defer { changingEQ = false }
             do {
-                gains = try await equalizer.set(gain, for: band)
+                gains = try await operation()
                 eqFailure = nil
             } catch {
-                gains[band] = previous
-                eqFailure = (error as? MusicEqualizer.Failure) ?? .unresponsive
+                gains = confirmed
+                let failure = (error as? MusicEqualizer.Failure) ?? .unresponsive
+                eqFailure = failure
+                if failure == .access, !offeredAccess {
+                    offeredAccess = true
+                    showAccess = true
+                }
             }
         }
     }
@@ -217,9 +211,10 @@ private struct EQKnob: View {
     let title: String
     let gain: Double?
     let accent: Color
-    let apply: (Double) -> Void
+    let apply: (MusicEqualizer.Adjustment) -> Void
 
     @GestureState private var adjustment: Double?
+    @FocusState private var focused: Bool
 
     private var displayedGain: Double? { adjustment ?? gain }
 
@@ -229,46 +224,57 @@ private struct EQKnob: View {
                 Circle().trim(from: 0, to: 0.75)
                     .stroke(.secondary.opacity(0.55), style: StrokeStyle(lineWidth: 2, lineCap: .round))
                     .rotationEffect(.degrees(135))
-                Circle().fill(.linearGradient(colors: [Color(white: 0.28), Color(white: 0.10)],
-                                              startPoint: .top, endPoint: .bottom))
-                    .strokeBorder(.white.opacity(0.22))
+                Circle().fill(.linearGradient(colors: [Color(white: 0.30), Color(white: 0.08)],
+                                              startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .strokeBorder(.white.opacity(0.28), style: StrokeStyle(lineWidth: 3, dash: [1, 1.8]))
                     .padding(4)
+                    .shadow(color: .black.opacity(0.5), radius: 1, y: 2)
                 Capsule().fill(accent)
-                    .frame(width: 2, height: 8)
-                    .offset(y: -10)
+                    .frame(width: 3, height: 12)
+                    .offset(y: -17)
                     .rotationEffect(.degrees((displayedGain ?? 0) * 11.25))
+                if focused, adjustment == nil {
+                    Circle().strokeBorder(accent.opacity(0.65), lineWidth: 1.5)
+                }
             }
-            .frame(width: 36, height: 36)
-            .frame(width: 44, height: 44)
+            .frame(width: 54, height: 54)
+            .frame(width: 60, height: 60)
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 3)
-                .updating($adjustment) { drag, preview, _ in preview = target(drag.translation) }
+                .updating($adjustment) { drag, preview, _ in
+                    preview = min(12, max(-12, (gain ?? 0) + delta(drag.translation)))
+                }
                 .onEnded { drag in
-                    if let value = target(drag.translation) { apply(value) }
+                    let change = delta(drag.translation).rounded()
+                    if change != 0 { apply(.relative(change)) }
                 })
-            .onTapGesture(count: 2) { if gain != nil { apply(0) } }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.callout.weight(.medium))
-                Text(displayedGain.map { "\($0 > 0 ? "+" : "")\(Int($0)) dB" } ?? "—")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
+            .onTapGesture(count: 2) { apply(.reset) }
+            .focusable()
+            .focusEffectDisabled()
+            .focused($focused)
+            .onMoveCommand { direction in
+                switch direction {
+                case .up, .right: apply(.relative(1))
+                case .down, .left: apply(.relative(-1))
+                @unknown default: break
+                }
             }
-            .frame(width: 48, alignment: .leading)
+            Text(title).font(.callout.weight(.medium))
+                .frame(width: 48, alignment: .leading)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
         .accessibilityValue(displayedGain.map { "\(Int($0)) decibelios" } ?? "No disponible")
         .accessibilityAdjustableAction { direction in
-            guard let gain else { return }
             switch direction {
-            case .increment: apply(min(12, gain + 1))
-            case .decrement: apply(max(-12, gain - 1))
+            case .increment: apply(.relative(1))
+            case .decrement: apply(.relative(-1))
             @unknown default: break
             }
         }
     }
 
-    private func target(_ translation: CGSize) -> Double? {
-        gain.map { min(12, max(-12, ($0 + (translation.width - translation.height) / 5).rounded())) }
+    private func delta(_ translation: CGSize) -> Double {
+        (translation.width - translation.height) / 6
     }
 }

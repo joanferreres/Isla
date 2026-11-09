@@ -30,6 +30,13 @@ cp "$project_root/THIRD-PARTY-NOTICES.md" "$app_path/Contents/Resources/THIRD-PA
 mkdir -p "$app_path/Contents/Resources/MediaRemoteAdapter"
 cp "$adapter_binary_root/libIslaMediaRemoteAdapter.dylib" "$app_path/Contents/Resources/MediaRemoteAdapter/"
 cp "$project_root/Vendor/MediaRemoteAdapter/run.pl" "$app_path/Contents/Resources/MediaRemoteAdapter/"
+widget="$app_path/Contents/PlugIns/IslaWidget.appex/Contents"
+mkdir -p "$widget/MacOS"
+cp "$project_root/Resources/WidgetInfo.plist" "$widget/Info.plist"
+xcrun swiftc -O -parse-as-library -application-extension -target arm64-apple-macos15 \
+    -sdk "$(xcrun --show-sdk-path)" -Xlinker -e -Xlinker _NSExtensionMain \
+    -Xlinker -exported_symbol -Xlinker _main \
+    "$source_root/Sources/IslaWidget/IslaWidget.swift" -o "$widget/MacOS/IslaWidget"
 xattr -cr "$app_path"
 python3 "$project_root/Scripts/sign-app.py" "$app_path"
 codesign --verify --deep --strict "$app_path"

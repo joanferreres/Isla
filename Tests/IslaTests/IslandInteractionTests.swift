@@ -1,5 +1,5 @@
 import XCTest
-import UniformTypeIdentifiers
+import AppKit
 import SwiftUI
 import IslandCore
 @testable import Isla
@@ -40,19 +40,41 @@ import IslandCore
  model.toggle();model.updatePointerPresence(false)
  try await Task.sleep(for:.milliseconds(320));XCTAssertTrue(model.state.expanded)
  }
- func testDropsResolveMultipleFilesOnceInOrderAndWithoutDuplicates() async throws {
+ func testDropsResolveMultipleFilesOnceInOrderAndWithoutDuplicates() throws {
  let directory=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
  try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
  defer { try? FileManager.default.removeItem(at:directory) }
  let first=directory.appendingPathComponent("one.txt"),second=directory.appendingPathComponent("two.txt")
  try Data("one".utf8).write(to:first);try Data("two".utf8).write(to:second)
- let result:[URL]=await withCheckedContinuation { continuation in
- let accepted=ShelfService.loadURLs([first,second,first].map{NSItemProvider(object:$0 as NSURL)}) { continuation.resume(returning:$0) }
- XCTAssertTrue(accepted)
- }
- XCTAssertEqual(result,[first,second])
+ let pasteboard=NSPasteboard.withUniqueName()
+ defer { pasteboard.releaseGlobally() }
+ XCTAssertTrue(pasteboard.writeObjects([first,second,first].map { $0 as NSURL }))
+ XCTAssertEqual(ShelfService.fileURLs(from:pasteboard),[first,second])
  }
  func testUnsupportedDropsDoNotOpenAirDrop() {
- XCTAssertFalse(ShelfService.loadURLs([NSItemProvider(object:"plain text" as NSString)]) { _ in XCTFail("Text is not a file") })
+ let pasteboard=NSPasteboard.withUniqueName()
+ defer { pasteboard.releaseGlobally() }
+ XCTAssertTrue(pasteboard.writeObjects(["plain text" as NSString]))
+ XCTAssertTrue(ShelfService.fileURLs(from:pasteboard).isEmpty)
+ }
+ func testFileDragOpensCompactShelfAndKeepsItOpenUntilDragEnds() async throws {
+ let model=IslandModel()
+ let point=CGPoint(x:25,y:20)
+ model.trackFileDrop(at:point)
+ XCTAssertTrue(model.state.expanded)
+ XCTAssertEqual(model.section,"Archivos")
+ XCTAssertEqual(model.fileDropTarget,.shelf)
+ model.updatePointerPresence(false)
+ try await Task.sleep(for:.milliseconds(320))
+ XCTAssertTrue(model.state.expanded)
+ model.airDropFrame=CGRect(x:250,y:70,width:100,height:80)
+ model.trackFileDrop(at:CGPoint(x:300,y:100))
+ XCTAssertEqual(model.fileDropTarget,.airDrop)
+ model.trackFileDrop(at:point)
+ XCTAssertEqual(model.fileDropTarget,.shelf)
+ model.finishFileDrop()
+ XCTAssertNil(model.fileDropTarget)
+ try await Task.sleep(for:.milliseconds(320))
+ XCTAssertFalse(model.state.expanded)
  }
 }

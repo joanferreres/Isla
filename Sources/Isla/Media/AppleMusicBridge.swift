@@ -1,11 +1,16 @@
 import AppKit
 import IslandCore
 struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Data?;var artworkTrackID:String?;var error:String?;var errorCode:Int?;var volume:Int?
+ var playlists:[MusicPlaylist]?;var playlistContainsTrack:Bool?
  func artwork(for trackID:String) -> Data? { artworkTrackID == trackID ? artwork : nil }
 }
 @MainActor enum MusicHelper {
  static func run(_ operation:String,argument:String?=nil) {
  var reply=MusicReply()
+ if let playlistReply=MusicPlaylistScripts.run(operation,argument:argument) {
+ if let data=try? JSONEncoder().encode(playlistReply) { FileHandle.standardOutput.write(data) }
+ return
+ }
  if !NSRunningApplication.runningApplications(withBundleIdentifier:"com.apple.Music").isEmpty {
  let source:String
  switch operation {

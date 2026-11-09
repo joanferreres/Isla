@@ -6,6 +6,7 @@ import IslandCore
  let preferences = PreferencesStore()
  let local = LocalStore()
  let music = AppleMusicService()
+ private let recordWidget = RecordWidgetState()
  let activity = CodexActivityService()
  let usage = CodexUsageService()
  let statistics = StatisticsStore()
@@ -26,6 +27,7 @@ import IslandCore
  if preferences.value.expandedWidth == 600 { preferences.value.expandedWidth=640 }
  UserDefaults.standard.set(true,forKey:"compactClickLayoutApplied")
  }
+ music.$state.sink { [weak self] state in self?.recordWidget.update(state) }.store(in:&integrationSubscriptions)
  activity.onCompletion = { [weak self] event in self?.statistics.record(event) }
  usage.onSnapshot = { [weak self] snapshot in self?.statistics.record(snapshot) }
  displays = DisplayCoordinator(preferences: preferences, local: local, music: music, calendar: calendar, activity: activity, usage: usage, statistics: statistics, showRecordPlayer: { [weak self] in self?.openRecordPlayer() }, settings: { [weak self] in self?.showSettings() })
@@ -74,12 +76,14 @@ import IslandCore
  for (title, action) in [("Abrir Isla", #selector(openIsland)), ("Tocadiscos…", #selector(openRecordPlayer)), ("Ajustes…", #selector(openSettings)), ("Salir", #selector(quit))] {
  let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; menu.addItem(item)
  }
+ menu.insertItem(makeDesktopMenuItem(),at:2)
  updateMenuItem=NSMenuItem(title:"",action:#selector(downloadUpdate),keyEquivalent:"")
  updateMenuItem?.target=self;updateMenuItem?.isHidden=true
  menu.insertItem(updateMenuItem!,at:menu.items.count-1)
  checkUpdateMenuItem=NSMenuItem(title:"Buscar actualizaciones…",action:#selector(checkForUpdates),keyEquivalent:"")
  checkUpdateMenuItem?.target=self;menu.insertItem(checkUpdateMenuItem!,at:menu.items.count-1)
  status?.menu = menu
+ recordPlayer.restoreDesktop()
  updates.onAvailable={ [weak self] in
  guard let self,self.preferences.value.aiVisualEnabled,NSApp.modalWindow == nil,
  let update=self.updates.claimAutomaticNotice() else { return }
@@ -120,11 +124,18 @@ import IslandCore
  }
  func installMainMenu() {
  let root = NSMenu(); let appMenu = NSMenu(); let appItem = NSMenuItem(); appItem.submenu = appMenu; root.addItem(appItem)
+ appMenu.addItem(makeDesktopMenuItem())
  let settingsItem = NSMenuItem(title:"Ajustes…",action:#selector(openSettings),keyEquivalent:","); settingsItem.target=self; appMenu.addItem(settingsItem)
  let quitItem = NSMenuItem(title:"Salir de Isla",action:#selector(quit),keyEquivalent:"q"); quitItem.target = self; appMenu.addItem(quitItem)
  let editMenu = NSMenu(title:"Edición"); let editItem = NSMenuItem(title:"Edición",action:nil,keyEquivalent:""); editItem.submenu = editMenu; root.addItem(editItem)
  for (title, selector, key) in [("Deshacer","undo:","z"),("Cortar","cut:","x"),("Copiar","copy:","c"),("Pegar","paste:","v"),("Seleccionar todo","selectAll:","a")] { editMenu.addItem(NSMenuItem(title:title,action:NSSelectorFromString(selector),keyEquivalent:key)) }
  NSApp.mainMenu = root
+ }
+ private func makeDesktopMenuItem() -> NSMenuItem {
+ let item=NSMenuItem(title:"Tocadiscos en el escritorio",action:#selector(toggleRecordDesktop),keyEquivalent:"")
+ item.target=self
+ recordPlayer.desktopEnabled.sink { [weak item] enabled in item?.state = enabled ? .on : .off }.store(in:&integrationSubscriptions)
+ return item
  }
  @objc func downloadUpdate() { updates.openDownload() }
  @objc func checkForUpdates() {
@@ -146,7 +157,11 @@ import IslandCore
  if alert.runModal() == .alertFirstButtonReturn { updates.openDownload() }
  }
  @objc func openIsland() { displays?.open() }
+ func application(_ application:NSApplication,open urls:[URL]) {
+ if urls.contains(where: { $0.scheme == "isla" && $0.host == "tocadiscos" }) { openRecordPlayer() }
+ }
  @objc func openRecordPlayer() { recordPlayer.show() }
+ @objc private func toggleRecordDesktop() { recordPlayer.toggleDesktop() }
  @objc func openSettings() { showSettings() }
  @objc func quit() { NSApp.terminate(nil) }
  func showSettings() {

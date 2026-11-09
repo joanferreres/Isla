@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 import IslandCore
 @MainActor struct IslandView: View {
  @ObservedObject var model:IslandModel
@@ -10,13 +9,13 @@ import IslandCore
  @ObservedObject var activity:CodexActivityService
  @ObservedObject var usage:CodexUsageService
  @ObservedObject var statistics:StatisticsStore
+ let airDrop:AirDropService
  let showRecordPlayer:() -> Void
  let settings:() -> Void
- @State private var section="Inicio"
  @State private var selectedAI="Codex"
- @State private var dragging=false
  var body:some View {
  let expanded=model.state.expanded
+ let section=model.section
  let width=expanded ? model.expandedSize.width : model.compactSize.width
  let centerWidth=min(width,model.notchWidth)
  let wingWidth=min(model.sideWidth,max(0,(width-centerWidth)/2))
@@ -27,7 +26,7 @@ import IslandCore
  if expanded {
  Color.clear.frame(height:model.headerHeight)
  HStack(spacing:width>=600 ? 10 : 5) {
- ForEach(["Inicio","Archivos","IA"],id:\.self) { tab in Button { section=tab } label: { HStack(spacing:4) { Image(systemName:tab == "Inicio" ? "square.grid.2x2.fill" : tab == "Archivos" ? "tray.fill" : "sparkles");if width>=600 { Text(tab) } }.padding(.horizontal,7).padding(.vertical,5).background(section == tab ? Color.white.opacity(0.12) : .clear,in:Capsule()) }.accessibilityLabel(tab).foregroundStyle(section == tab ? .white : .gray) }
+ ForEach(["Inicio","Archivos","IA"],id:\.self) { tab in Button { model.section=tab } label: { HStack(spacing:4) { Image(systemName:tab == "Inicio" ? "square.grid.2x2.fill" : tab == "Archivos" ? "tray.fill" : "sparkles");if width>=600 { Text(tab) } }.padding(.horizontal,7).padding(.vertical,5).background(section == tab ? Color.white.opacity(0.12) : .clear,in:Capsule()) }.accessibilityLabel(tab).foregroundStyle(section == tab ? .white : .gray) }
  Spacer(minLength:0)
  Button { preferences.value.aiNotificationMode=preferences.value.aiNotificationMode.next } label: {
  Image(systemName:preferences.value.aiNotificationMode == .none ? "moon.fill" : preferences.value.aiNotificationMode == .visual ? "moon.stars.fill" : "moon")
@@ -61,8 +60,8 @@ import IslandCore
  if expanded {
  VStack(spacing:8) {
  if activity.latest != nil && section == "IA" { Button("Codex ha terminado · Abrir") { activity.openCodex() }.buttonStyle(.plain).font(.caption).foregroundStyle(.mint) }
- if section == "Archivos" { ShelfView(store:local,model:model) }
- else if section == "Inicio" { HomeView(model:model,music:music,calendar:calendar,preferences:preferences,usage:usage,activity:activity,openCodex:{ selectedAI=$0;section="IA" }).frame(maxWidth:.infinity,maxHeight:.infinity) }
+ if section == "Archivos" { ShelfView(store:local,model:model,airDrop:airDrop) }
+ else if section == "Inicio" { HomeView(model:model,music:music,calendar:calendar,preferences:preferences,usage:usage,activity:activity,openCodex:{ selectedAI=$0;model.section="IA" }).frame(maxWidth:.infinity,maxHeight:.infinity) }
  else if section == "IA" { AIUsageView(usage:usage,activity:activity,statistics:statistics,selected:$selectedAI) }
  else { VStack(spacing:8) { Image(systemName:section == "Codex" ? "terminal" : "music.note").font(.largeTitle); Text(section == "Codex" ? "Conecta Codex desde Ajustes" : "Conecta Apple Music y Calendario desde Ajustes").foregroundStyle(.secondary) }.frame(maxWidth:.infinity,maxHeight:.infinity) }
  if let message=local.message { Text(message).font(.caption).foregroundStyle(.orange) }
@@ -78,6 +77,7 @@ import IslandCore
  .animation(reduced ? .easeOut(duration:0.15) : .spring(response:0.35,dampingFraction:0.9),value:model.compactSize)
  .animation(reduced ? .easeOut(duration:0.15) : .spring(response:expanded ? 0.38 : 0.32,dampingFraction:expanded ? 0.8 : 0.9),value:expanded)
  .frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.top)
+ .coordinateSpace(name:"island")
  .preferredColorScheme(.dark)
  .contentShape(Rectangle())
  .contextMenu {
@@ -90,12 +90,6 @@ import IslandCore
  Divider()
  Button("Salir de Isla") { NSApp.terminate(nil) }
  }
- .onChange(of:section) { _,value in model.trayMode = value == "Archivos" }
  .onExitCommand { model.close() }
- .onDrop(of:expanded ? [UTType.fileURL] : [],isTargeted:$dragging) { providers in
- guard model.state.expanded else { return false }
- section="Archivos";return ShelfService.accept(providers,into:local)
- }
- .onChange(of:dragging) { _,active in if active && model.state.expanded { section="Archivos" } }
  }
 }

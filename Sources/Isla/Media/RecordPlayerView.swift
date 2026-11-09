@@ -40,8 +40,9 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     @ObservedObject var music: AppleMusicService
     @ObservedObject var preferences: PreferencesStore
     @ObservedObject var presentation: RecordPlayerPresentation
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @StateObject private var speakerBattery = BluetoothSpeakerBattery()
     @State private var artwork: NSImage?
     @State private var showsAmbiences = false
     @State private var pendingCue: PendingCue?
@@ -65,19 +66,20 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     private var palette: RecordPlayerPalette { presentation.palette }
     private var ink: Color { palette.ink }
     private var accent: Color { palette.accent }
+    private var reduceMotion: Bool { systemReduceMotion || preferences.value.reduceMotion }
 
     var body: some View {
         GeometryReader { proxy in
-            let diameter = max(120, min(660, (proxy.size.width - 274) / 1.22, (proxy.size.height - 176) / 1.22))
+            let diameter = max(120, min(660, (proxy.size.width - 294) / 1.22, (proxy.size.height - 176) / 1.22))
             let snapshot = music.state.snapshot
-            let ticking = presentation.isVisible && snapshot?.playing == true
+            let ticking = presentation.isVisible && music.enabled && snapshot?.playing == true
             let spinning = ticking && !reduceMotion
             ZStack {
                 HStack(spacing: diameter * 0.14 + 14) {
                     turntable(diameter: diameter, snapshot: snapshot, ticking: ticking, spinning: spinning)
                     RecordPlayerMixer(music: music, palette: palette,
                                       active: presentation.isVisible && music.enabled)
-                        .frame(width: 200)
+                        .frame(width: 220)
                 }
                 .padding(.leading, diameter * 0.11)
                 VStack {
@@ -93,6 +95,8 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
         .foregroundStyle(ink)
         .background(Color(nsColor: palette.background).ignoresSafeArea())
         .preferredColorScheme(.dark)
+        .onChange(of: presentation.isVisible, initial: true) { _, visible in speakerBattery.setVisible(visible) }
+        .onDisappear { speakerBattery.setVisible(false) }
         .onChange(of: music.state.artworkData, initial: true) { _, data in
             artwork = data.flatMap(NSImage.init(data:))
         }
@@ -113,15 +117,18 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
 
     private func turntable(diameter: CGFloat, snapshot: MediaSnapshot?, ticking: Bool, spinning: Bool) -> some View {
         let width = diameter * RecordCue.armWidth
-        return TimelineView(.animation(minimumInterval: spinning ? 1.0 / 30 : 1, paused: !ticking)) { context in
+        return TimelineView(.animation(minimumInterval: spinning ? 1.0 / 20 : 1, paused: !ticking)) { context in
             let elapsed = playbackSeconds(snapshot, at: context.date)
             let duration = snapshot?.duration ?? 0
             let progress = duration > 0 ? min(1, elapsed / duration) : 0
             let phase = elapsed.truncatingRemainder(dividingBy: 3.6) * 100
             let playing = snapshot?.playing == true
-            VinylRecord(artwork: artwork, palette: palette)
+            VinylRecord(artwork: artwork, palette: palette, rotation: reduceMotion ? 0 : phase)
                 .frame(width: diameter, height: diameter)
-                .rotationEffect(.degrees(reduceMotion ? 0 : phase))
+                .modifier(RecordSwipeGesture(diameter: diameter, reduceMotion: reduceMotion,
+                                             trackID: music.enabled ? snapshot?.trackID : nil) { direction, trackID in
+                    music.send(direction == .next ? .next : .previous, trackID: trackID)
+                })
                 .background {
                     if spinning {
                         RecordSoundWaves(diameter: diameter, elapsed: elapsed, accent: accent)
@@ -229,6 +236,18 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                 }
             }
             Divider().frame(height: 22).accessibilityHidden(true)
+            if let battery = speakerBattery.reading {
+                Label("\(battery.percent) %", systemImage: battery.symbol)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                    .accessibilityLabel("Batería de \(battery.name)")
+                    .accessibilityValue("\(battery.percent) por ciento")
+                    .help(battery.name)
+            }
+            if let snapshot, music.enabled {
+                RecordPlaylistPicker(track: snapshot).id(snapshot.trackID)
+            }
             paletteSelector
         }
         .padding(.horizontal, 20)
@@ -386,6 +405,17 @@ private struct RecordSoundWaves: View {
     let elapsed: Double
     let accent: Color
 
+    // Each ring reuses the same outline. Only its size, angle and opacity change.
+    private static let outline = Path { path in
+        for sample in 0..<96 {
+            let angle = Double(sample) * 2 * .pi / 96
+            let radius = 1 + 0.007 * (sin(9 * angle) + 0.45 * sin(13 * angle))
+            let point = CGPoint(x: radius * cos(angle), y: radius * sin(angle))
+            if sample == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        path.closeSubpath()
+    }
+
     var body: some View {
         Canvas { context, size in
             let center = CGPoint(x: size.width / 2, y: size.height / 2)
@@ -395,25 +425,20 @@ private struct RecordSoundWaves: View {
                 let phase = offset.truncatingRemainder(dividingBy: 1)
                 let radius = diameter * (0.501 + 0.092 * phase)
                 let opacity = sin(.pi * phase) * (1 - 0.55 * phase)
-                var wave = Path()
-                for sample in 0..<96 {
-                    let angle = Double(sample) * 2 * .pi / 96
-                    let ripple = sin(9 * angle - 2 * .pi * phase) + 0.45 * sin(13 * angle + Double(index))
-                    let distance = radius + diameter * 0.0035 * ripple
-                    let point = CGPoint(x: center.x + distance * cos(angle), y: center.y + distance * sin(angle))
-                    if sample == 0 { wave.move(to: point) } else { wave.addLine(to: point) }
-                }
-                wave.closeSubpath()
-                context.stroke(wave, with: .color(accent.opacity(0.12 * opacity)), lineWidth: 4)
+                let transform = CGAffineTransform(translationX: center.x, y: center.y)
+                    .rotated(by: phase * 2 * .pi / 9)
+                    .scaledBy(x: radius, y: radius)
+                let wave = Self.outline.applying(transform)
                 context.stroke(wave, with: .color(accent.opacity(0.56 * opacity)), lineWidth: 1.15)
             }
         }
     }
 }
 
-private struct VinylRecord: View {
+struct VinylRecord: View {
     let artwork: NSImage?
     let palette: RecordPlayerPalette
+    let rotation: Double
 
     var body: some View {
         GeometryReader { proxy in
@@ -439,6 +464,7 @@ private struct VinylRecord: View {
                 }
                 .frame(width: size * 0.36, height: size * 0.36)
                 .clipShape(Circle())
+                .rotationEffect(.degrees(rotation))
                 .overlay(Circle().strokeBorder(.black.opacity(0.45), lineWidth: 1))
                 Circle().fill(.black).frame(width: size * 0.022, height: size * 0.022)
                     .overlay(Circle().strokeBorder(.white.opacity(0.3), lineWidth: 1))
@@ -487,6 +513,7 @@ private struct Tonearm: View {
         .animation(dragPoint == nil ? animation : nil, value: trackID)
         .animation(dragPoint == nil ? animation : nil, value: playing)
         .accessibilityHidden(true)
+        .allowsHitTesting(false)
         .overlay {
             if let trackID {
                 GeometryReader { proxy in

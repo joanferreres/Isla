@@ -1,14 +1,13 @@
 import SwiftUI
 import AppKit
 import QuickLookThumbnailing
-import UniformTypeIdentifiers
 @MainActor struct ShelfView:View {
  @ObservedObject var store:LocalStore
  @ObservedObject var model:IslandModel
- @StateObject private var airDrop=AirDropService()
- @State private var targeted=false
- @State private var airDropTargeted=false
+ @ObservedObject var airDrop:AirDropService
  var body:some View {
+ let targeted=model.fileDropTarget == .shelf
+ let airDropTargeted=model.fileDropTarget == .airDrop
  HStack(spacing:12) {
  ZStack {
  RoundedRectangle(cornerRadius:18).strokeBorder(targeted ? Color.mint : .white.opacity(0.16),style:StrokeStyle(lineWidth:1.5,dash:[5,5]))
@@ -41,7 +40,6 @@ import UniformTypeIdentifiers
  } label: { Image(systemName:"ellipsis").font(.system(size:12,weight:.bold)).padding(8) }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("Opciones de la bandeja") };Spacer() }
  }
  .background(targeted ? Color.mint.opacity(0.05) : .clear,in:RoundedRectangle(cornerRadius:18))
- .onDrop(of:[UTType.fileURL],isTargeted:$targeted) { ShelfService.accept($0,into:store) }
  VStack(spacing:7) {
  ZStack { ForEach([12.0,20,28],id:\.self) { diameter in Circle().stroke(lineWidth:1.2).frame(width:diameter,height:diameter) };Circle().fill().frame(width:4,height:4) }.frame(width:32,height:32)
  Text(airDrop.active ? "Elige destinatario" : "AirDrop").font(.system(size:11,weight:.medium))
@@ -50,7 +48,8 @@ import UniformTypeIdentifiers
  .foregroundStyle(airDropTargeted ? .mint : .gray)
  .background(airDropTargeted ? Color.mint.opacity(0.12) : .white.opacity(0.04),in:RoundedRectangle(cornerRadius:18))
  .overlay(RoundedRectangle(cornerRadius:18).strokeBorder(airDropTargeted ? Color.mint : .white.opacity(0.12),style:StrokeStyle(lineWidth:1.5,dash:[5,5])))
- .onDrop(of:[UTType.fileURL],isTargeted:$airDropTargeted) { providers in ShelfService.loadURLs(providers) { airDrop.send($0,model:model) } }
+ .onGeometryChange(for:CGRect.self) { $0.frame(in:.named("island")) } action: { model.airDropFrame=$0 }
+ .onDisappear { model.airDropFrame = .null }
  .accessibilityLabel("AirDrop: arrastra archivos para elegir un destinatario")
  }.overlay(alignment:.bottom) { if let error=airDrop.error { Text(error).font(.caption2).foregroundStyle(.orange).padding(5).background(.black.opacity(0.9),in:Capsule()) } }
  }

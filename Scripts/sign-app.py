@@ -15,6 +15,8 @@ keychain = base / 'isla-signing.keychain-db'
 certificate = base / 'certificate.pem'
 password = base / 'keychain-password'
 helper = app / 'Contents/Resources/MediaRemoteAdapter/libIslaMediaRemoteAdapter.dylib'
+widget = app / 'Contents/PlugIns/IslaWidget.appex'
+widget_entitlements = Path(__file__).resolve().parent.parent / 'Resources/Widget.entitlements'
 if all(p.exists() for p in (keychain, certificate, password)):
     result = subprocess.run(['security', 'unlock-keychain', '-p', password.read_text(), str(keychain)], capture_output=True)
     if result.returncode:
@@ -22,10 +24,15 @@ if all(p.exists() for p in (keychain, certificate, password)):
     fingerprint = subprocess.check_output(['openssl', 'x509', '-in', str(certificate), '-noout', '-fingerprint', '-sha1'], text=True).strip().split('=')[1].replace(':', '')
     args = ['codesign', '--force', '--sign', fingerprint, '--keychain', str(keychain)]
     subprocess.run(args + [str(helper)], check=True)
+    if widget.exists():
+        subprocess.run(args + ['--entitlements', str(widget_entitlements), str(widget)], check=True)
     requirement = f'-r=designated => identifier "local.personal.isla" and certificate leaf = H"{fingerprint}"'
     subprocess.run(args + [requirement, str(app)], check=True)
     print('Signed with persistent personal Isla identity.')
 else:
     print('Personal identity absent: ad hoc signature; permissions may need renewing after updates.')
-    for target in (helper, app):
-        subprocess.run(['codesign', '--force', '--sign', '-', str(target)], check=True)
+    args = ['codesign', '--force', '--sign', '-']
+    subprocess.run(args + [str(helper)], check=True)
+    if widget.exists():
+        subprocess.run(args + ['--entitlements', str(widget_entitlements), str(widget)], check=True)
+    subprocess.run(args + [str(app)], check=True)

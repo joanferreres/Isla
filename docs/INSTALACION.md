@@ -27,7 +27,10 @@ Abre Isla desde su icono de la barra de menús y entra en **Ajustes**. En la isl
 | Función | Configuración y permiso |
 | --- | --- |
 | Música | Activa Apple Music. Acepta Automatización de Music si quieres controlarla desde Isla. |
-| Tocadiscos | Pulsa el disco junto a la luna. El botón verde lo abre a pantalla completa. Mantén pulsado ⌘ en la barra para ver los diez ambientes, o cambia directamente con ⌘0 a ⌘9. El fader vertical ajusta el volumen de Música. Para los mandos de EQ, abre **Configurar EQ**, activa Isla en Accesibilidad y deja abierto el ecualizador de Música (⌥⌘E). |
+| Tocadiscos | Pulsa el disco junto a la luna. El botón verde lo abre a pantalla completa. Sobre el vinilo, arrastra o desliza dos dedos a la izquierda para avanzar y a la derecha para retroceder. Mantén pulsado ⌘ para ver los diez ambientes. El fader vertical ajusta el volumen de Música. Si la salida Bluetooth publica su batería, el porcentaje aparece junto a ⌘. Gira los mandos para ajustar el ecualizador o pulsa la flecha circular sobre ellos para volver a sonido plano. Si macOS pide acceso la primera vez, activa Isla en Accesibilidad y vuelve a girar el mando. |
+| Archivos | Arrastra archivos de Finder al notch para abrir la bandeja. Suelta en la bandeja para guardar un acceso al original, o en AirDrop para elegir un destinatario. Arrastra un archivo desde la bandeja para usarlo en otra app. |
+| Añadir a playlist | En **Inicio**, pulsa el icono de lista con un signo + al lado de los controles de la canción. También está en el tocadiscos junto a ⌘. Elige una playlist editable de Música. Para algunas canciones del catálogo, Isla usa la ventana principal de Música y el permiso de Accesibilidad. |
+| Tocadiscos en el escritorio | Actívalo desde el menú de Isla. Arrastra el encabezado para moverlo. La flecha abre el tocadiscos completo y la × lo oculta. Isla recuerda su posición. |
 | Calendario | Activa Calendario y concede acceso a los calendarios que quieras consultar. |
 | IA | Inicia sesión en tus propias aplicaciones y activa las conexiones de Codex, Cursor o Claude. La disponibilidad de datos depende de cada servicio. |
 | Avisos | La luna permite sonido y señal visual, solo señal visual o ningún aviso. La chincheta mantiene la isla abierta. |
@@ -53,3 +56,7 @@ shasum -a 256 -c SHA256SUMS.txt
 ```
 
 Debe indicar `Isla.zip: OK`. Esta comprobación detecta diferencias respecto al archivo publicado; no sustituye la notarización ni una revisión del código.
+
+### Widget nativo del tocadiscos
+
+Abre **Editar widgets** desde el escritorio, busca **Isla** y arrastra **Tocadiscos** al escritorio. Está disponible en tamaño pequeño y mediano. Muestra la canción actual, coloca el brazo sobre el disco mientras se reproduce y, al pulsarlo, abre el tocadiscos de Isla.

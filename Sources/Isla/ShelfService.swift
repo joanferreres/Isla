@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 @MainActor enum ShelfService {
  @discardableResult static func copy(_ url:URL) -> Bool {
  guard FileManager.default.fileExists(atPath:url.path) else { return false }
@@ -15,19 +14,13 @@ import UniformTypeIdentifiers
  NSPasteboard.general.clearContents()
  return NSPasteboard.general.writeObjects([item])
  }
- @discardableResult static func loadURLs(_ providers:[NSItemProvider],completion:@escaping @MainActor ([URL]) -> Void) -> Bool {
- let supported=providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
- guard !supported.isEmpty else { return false }
- let batch=ShelfDropBatch(count:supported.count,completion:completion)
- for (index,provider) in supported.enumerated() {
- provider.loadDataRepresentation(forTypeIdentifier:UTType.fileURL.identifier) { data,_ in
- let url=data.flatMap { URL(dataRepresentation:$0,relativeTo:nil) }
- Task { @MainActor in batch.finish(index:index,url:url) }
+ static func fileURLs(from pasteboard:NSPasteboard) -> [URL] {
+ let items=pasteboard.readObjects(forClasses:[NSURL.self],options:[.urlReadingFileURLsOnly:true]) ?? []
+ var seen=Set<URL>()
+ return items.compactMap { ($0 as? URL)?.standardizedFileURL }.filter {
+ $0.isFileURL && FileManager.default.fileExists(atPath:$0.path) && seen.insert($0).inserted
  }
  }
- return true
- }
- static func accept(_ providers:[NSItemProvider],into store:LocalStore) -> Bool { loadURLs(providers) { store.addFiles($0) } }
  static func chooseFiles(into store: LocalStore,onBegin: () -> Void,onEnd: @escaping () -> Void) {
   let picker = NSOpenPanel(); picker.canChooseDirectories = true; picker.allowsMultipleSelection = true
   picker.title = "Añadir a la bandeja"; picker.prompt = "Añadir"
@@ -65,30 +58,20 @@ struct ShareFileButton: NSViewRepresentable {
  }
 }
 
-@MainActor private final class ShelfDropBatch {
- private var remaining:Int
- private var urls:[Int:URL]=[:]
- private let completion:@MainActor ([URL]) -> Void
- init(count:Int,completion:@escaping @MainActor ([URL]) -> Void) { remaining=count;self.completion=completion }
- func finish(index:Int,url:URL?) {
- if let url,url.isFileURL,FileManager.default.fileExists(atPath:url.path) { urls[index]=url.standardizedFileURL }
- remaining -= 1
- if remaining == 0 { var seen=Set<URL>();completion(urls.keys.sorted().compactMap{urls[$0]}.filter{seen.insert($0).inserted}) }
- }
-}
 @MainActor final class AirDropService:NSObject,ObservableObject,@preconcurrency NSSharingServiceDelegate {
  @Published private(set) var active=false
  @Published private(set) var error:String?
  private var sharing:NSSharingService?
  private weak var model:IslandModel?
- func send(_ urls:[URL],model:IslandModel) {
- guard !active else { return }
+ @discardableResult func send(_ urls:[URL],model:IslandModel) -> Bool {
+ guard !active else { return false }
  let files=urls.filter { $0.isFileURL && FileManager.default.fileExists(atPath:$0.path) }
- guard !files.isEmpty else { error="El archivo ya no está disponible.";return }
- guard let service=NSSharingService(named:.sendViaAirDrop),service.canPerform(withItems:files) else { error="AirDrop no está disponible en este Mac.";return }
+ guard !files.isEmpty else { error="El archivo ya no está disponible.";return false }
+ guard let service=NSSharingService(named:.sendViaAirDrop),service.canPerform(withItems:files) else { error="AirDrop no está disponible en este Mac.";return false }
  self.model=model;model.beginInteraction();active=true;error=nil;sharing=service;service.delegate=self
  NSApp.activate(ignoringOtherApps:true)
  service.perform(withItems:files)
+ return true
  }
  func sharingService(_ sharingService:NSSharingService,didShareItems items:[Any]) { finish() }
  func sharingService(_ sharingService:NSSharingService,didFailToShareItems items:[Any],error:Error) { if (error as NSError).code != NSUserCancelledError { self.error="No se pudo compartir el archivo por AirDrop." };finish() }

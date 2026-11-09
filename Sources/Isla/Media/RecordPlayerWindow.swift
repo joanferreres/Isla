@@ -1,11 +1,19 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor final class RecordPlayerPresentation: ObservableObject {
     @Published var isVisible = false
+    @Published var isDesktopVisible = false
+    @Published private(set) var desktopEnabled = UserDefaults.standard.bool(forKey: "recordPlayer.desktopEnabled")
     @Published private(set) var palette = UserDefaults.standard.string(forKey: "recordPlayer.palette")
         .flatMap(RecordPlayerPalette.init(rawValue:)) ?? .blue
     var onPaletteChange: ((RecordPlayerPalette) -> Void)?
+
+    func setDesktopEnabled(_ enabled: Bool) {
+        desktopEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "recordPlayer.desktopEnabled")
+    }
 
     func select(_ palette: RecordPlayerPalette) {
         guard self.palette != palette else { return }
@@ -29,11 +37,20 @@ private final class RecordPlayerNativeWindow: NSWindow {
     }
 }
 
+private final class RecordPlayerDesktopPanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
 @MainActor final class RecordPlayerWindow: NSObject, NSWindowDelegate {
     private let music: AppleMusicService
     private let preferences: PreferencesStore
     private let presentation = RecordPlayerPresentation()
     private var window: NSWindow?
+    private var desktopWindow: NSPanel?
+    private let desktopFrameName = "IslaRecordDesktop"
+
+    var desktopEnabled: AnyPublisher<Bool, Never> { presentation.$desktopEnabled.eraseToAnyPublisher() }
 
     init(music: AppleMusicService, preferences: PreferencesStore) {
         self.music = music
@@ -45,6 +62,54 @@ private final class RecordPlayerNativeWindow: NSWindow {
         NSApp.activate(ignoringOtherApps: true)
         if window.isMiniaturized { window.deminiaturize(nil) }
         window.makeKeyAndOrderFront(nil)
+        refreshVisibility()
+    }
+
+    func restoreDesktop() {
+        if presentation.desktopEnabled { showDesktop() }
+    }
+
+    func toggleDesktop() {
+        if presentation.desktopEnabled {
+            desktopWindow?.saveFrame(usingName: desktopFrameName)
+            desktopWindow?.close()
+            desktopWindow = nil
+            presentation.setDesktopEnabled(false)
+        } else {
+            showDesktop()
+            if desktopWindow != nil { presentation.setDesktopEnabled(true) }
+        }
+    }
+
+    private func showDesktop() {
+        guard desktopWindow == nil, let screen = window?.screen ?? NSScreen.main else { return }
+        let size = CGSize(width: 242, height: 240)
+        let visible = screen.visibleFrame
+        let frame = CGRect(x: visible.maxX - size.width - 24, y: visible.minY + 24,
+                           width: size.width, height: size.height)
+        let panel = RecordPlayerDesktopPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel],
+                                             backing: .buffered, defer: false)
+        panel.title = "Tocadiscos en el escritorio"
+        panel.isReleasedWhenClosed = false
+        panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
+        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
+        panel.hidesOnDeactivate = false
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.appearance = NSAppearance(named: .darkAqua)
+        panel.delegate = self
+        panel.contentView = IslandHostingView(rootView: RecordDesktopView(
+            music: music, preferences: preferences, presentation: presentation,
+            openPlayer: { [weak self] in self?.show() },
+            close: { [weak self] in self?.toggleDesktop() }
+        ))
+        if panel.setFrameUsingName(desktopFrameName),
+           !NSScreen.screens.contains(where: { $0.visibleFrame.contains(panel.frame) }) {
+            panel.setFrame(frame, display: false)
+        }
+        panel.setFrameAutosaveName(desktopFrameName)
+        desktopWindow = panel
+        panel.orderFrontRegardless()
         refreshVisibility()
     }
 
@@ -76,11 +141,20 @@ private final class RecordPlayerNativeWindow: NSWindow {
     func windowDidChangeOcclusionState(_ notification: Notification) { refreshVisibility() }
     func windowDidMiniaturize(_ notification: Notification) { presentation.isVisible = false }
     func windowDidDeminiaturize(_ notification: Notification) { refreshVisibility() }
-    func windowWillClose(_ notification: Notification) { presentation.isVisible = false }
+    func windowWillClose(_ notification: Notification) {
+        if notification.object as? NSWindow === desktopWindow { presentation.isDesktopVisible = false }
+        else { presentation.isVisible = false }
+    }
 
     private func refreshVisibility() {
-        guard let window else { return }
-        let visible = window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible)
+        let visible = isVisible(window)
         if presentation.isVisible != visible { presentation.isVisible = visible }
+        let desktopVisible = isVisible(desktopWindow)
+        if presentation.isDesktopVisible != desktopVisible { presentation.isDesktopVisible = desktopVisible }
+    }
+
+    private func isVisible(_ window: NSWindow?) -> Bool {
+        guard let window else { return false }
+        return window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible)
     }
 }

@@ -17,15 +17,17 @@ import AppKit
   let restored = try await store.repository.load()
   XCTAssertEqual(restored.files.map(\.url),[file])
  }
- func testDraggedFileProviderIsAccepted() async throws {
+ func testDraggedFilePasteboardIsAccepted() async throws {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   defer { try? FileManager.default.removeItem(at: directory) }
   try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
   let file = directory.appendingPathComponent("drag.txt")
   try Data("test".utf8).write(to:file)
   let store = LocalStore(directory:directory.appendingPathComponent("data"))
-  let provider = try XCTUnwrap(NSItemProvider(contentsOf:file))
-  XCTAssertTrue(ShelfService.accept([provider],into:store))
+  let pasteboard=NSPasteboard.withUniqueName()
+  defer { pasteboard.releaseGlobally() }
+  XCTAssertTrue(pasteboard.writeObjects([file as NSURL]))
+  store.addFiles(ShelfService.fileURLs(from:pasteboard))
   let deadline = Date().addingTimeInterval(2)
   while store.document.files.isEmpty && Date() < deadline { try await Task.sleep(for:.milliseconds(10)) }
   XCTAssertEqual(store.document.files.map(\.url),[file])

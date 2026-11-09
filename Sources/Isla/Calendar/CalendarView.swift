@@ -71,7 +71,7 @@ import IslandCore
  CalendarView(calendar:calendar,model:model).frame(width:max(0,(space.size.width-17)*0.56))
  if playing {
  Divider().overlay(.white.opacity(0.10))
- MediaView(music:music).frame(maxWidth:.infinity)
+ MediaView(music:music,island:model).frame(maxWidth:.infinity)
  } else if showAI {
  Divider().overlay(.white.opacity(0.10))
  AIHomeRow(usage:usage,activity:activity,preferences:preferences,open:openCodex,vertical:true).frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.center)

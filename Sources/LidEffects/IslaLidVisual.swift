@@ -116,7 +116,10 @@ public actor IslaLidSensor {
  /// Stop acquiring frames immediately, then reverse the last image to clear.
  /// Repeated idle sensor polls must not reset the spring or extend the animation.
  public func finish() {
- guard showing else { stop();return }
+ guard showing else {
+ if !health.canStart || isCapturing || prewarmedFrame != nil || snapshotter.latestImage != nil { stop() }
+ return
+ }
  guard !finishing else { return }
  finishing=true;targetProgress=0;targetAngle=currentAngle
  seedGeneration += 1;seedTask?.cancel();seedTask=nil;snapshotter.stop();stream.stop();health.stop()
