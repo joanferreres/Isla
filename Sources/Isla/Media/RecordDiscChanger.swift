@@ -2,8 +2,8 @@ import SwiftUI
 import IslandCore
 
 /// Half-clipped rotary disc selector on the window’s leading edge — no boxed panel.
-/// Two-finger torque / rotate spins the ring around its centre like a turntable.
-/// The disc at +X (middle of the visible right half) is selected; Play loads it.
+/// Two-finger torque spins a **stable ordered** ring; the main turntable never changes
+/// until Play. The disc at +X (middle of the visible right half) is the selection.
 struct RecordDiscChanger: View {
     let palette: RecordPlayerPalette
     let reduceMotion: Bool
@@ -16,9 +16,9 @@ struct RecordDiscChanger: View {
     @State private var catalog: MusicPlaylistCatalog?
     @State private var error: String?
     @State private var loading = true
-    /// Index of the track parked at the +X “front” slot (middle of the visible half).
+    /// Snapped index at the +X front slot when `ringAngle == 0`.
     @State private var selected = 0
-    /// Continuous ring angle in degrees. 0 = selected track at +X.
+    /// Continuous orbit angle. Tracks keep a fixed order; only this angle moves.
     @State private var ringAngle = 0.0
     @State private var artworks: [String: NSImage] = [:]
     @State private var busy = false
@@ -27,6 +27,7 @@ struct RecordDiscChanger: View {
     @State private var turnOrigin = 0.0
     @State private var samples: [(Date, Double)] = []
     @State private var dragLastAngle: Double?
+    @State private var snapTask: Task<Void, Never>?
 
     private let slotCount = 6
     private var step: Double { 360.0 / Double(slotCount) }
@@ -34,9 +35,18 @@ struct RecordDiscChanger: View {
     private var discSize: CGFloat { diameter * 0.28 }
 
     private var tracks: [MusicCassetteTrack] { catalog?.tracks ?? [] }
-    private var selectedTrack: MusicCassetteTrack? {
-        guard tracks.indices.contains(selected) else { return nil }
-        return tracks[selected]
+
+    /// Track currently at the right-hand front (+X), including mid-spin preview.
+    private var frontIndex: Int {
+        guard !tracks.isEmpty else { return 0 }
+        let moved = Int((-ringAngle / step).rounded())
+        let count = tracks.count
+        return ((selected + moved) % count + count) % count
+    }
+
+    private var frontTrack: MusicCassetteTrack? {
+        guard tracks.indices.contains(frontIndex) else { return nil }
+        return tracks[frontIndex]
     }
 
     var body: some View {
@@ -56,34 +66,55 @@ struct RecordDiscChanger: View {
                 carousel
                 centerPlay
             }
+            if let frontTrack, !loading {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(frontTrack.title)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(palette.ink.opacity(0.9))
+                        .lineLimit(2)
+                    if !frontTrack.artist.isEmpty {
+                        Text(frontTrack.artist)
+                            .font(.caption2)
+                            .foregroundStyle(palette.ink.opacity(0.55))
+                            .lineLimit(1)
+                    }
+                }
+                .frame(width: max(96, diameter * 0.42), alignment: .leading)
+                .offset(x: diameter * 0.52, y: 0)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
             if let status {
                 Text(status)
                     .font(.caption2)
                     .foregroundStyle(palette.accent)
                     .lineLimit(2)
                     .frame(width: diameter * 0.42)
-                    .offset(x: diameter * 0.22, y: diameter * 0.42)
+                    .offset(x: diameter * 0.52, y: diameter * 0.28)
             }
         }
         .frame(width: diameter, height: diameter)
-        // Full-size invisible turn surface — offsets alone never expand layout, so this
-        // must be an explicit diameter×diameter sibling (not a .background of offset discs).
         .background {
             ChangerTurnSurface(
                 onTorque: { degrees in applyTorque(degrees) },
-                onFinish: { cancelled in finishTurn(cancelled: cancelled) }
+                onFinish: { cancelled in scheduleSnap(cancelled: cancelled) }
             )
             .frame(width: diameter, height: diameter)
             .allowsHitTesting(false)
         }
         .gesture(angularDrag)
         .contentShape(Path(CGRect(x: diameter * 0.5, y: 0, width: diameter * 0.5, height: diameter)))
-        .help(selectedTrack.map { "\($0.title) — gira con dos dedos" } ?? "Cambiador de discos")
+        .help(frontTrack.map { "\($0.title) — gira para elegir; Play para el plato" } ?? "Cambiador de discos")
+        // Reload when now-playing changes (after Play), never while browsing the ring.
         .task(id: "\(currentTitle ?? "")|\(currentArtist ?? "")") { await reload() }
+        .onDisappear {
+            snapTask?.cancel()
+            RecordGestureClaim.selectorActive = false
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Cambiador de discos")
-        .accessibilityValue(selectedTrack.map(\.title) ?? "")
-        .accessibilityHint("Gira con dos dedos; el disco de la derecha es el seleccionado")
+        .accessibilityValue(frontTrack.map(\.title) ?? "")
+        .accessibilityHint("Gira con dos dedos; Play pone esa canción en el tocadiscos")
         .accessibilityAdjustableAction { direction in
             switch direction {
             case .increment: nudgeSlots(1)
@@ -111,24 +142,25 @@ struct RecordDiscChanger: View {
 
     private var carousel: some View {
         let visible = min(slotCount, max(tracks.count, 0))
+        // Stable ordered window: same playlist order, only the orbit angle changes.
         return ZStack {
             ForEach(0..<visible, id: \.self) { slot in
                 let track = tracks[(selected + slot) % tracks.count]
-                // θ=0 → +X (into the player) = middle of the visible right half.
                 let theta = (Double(slot) * step + ringAngle) * .pi / 180
                 let depth = max(0.12, cos(theta))
                 let atFront = abs(shortest(Double(slot) * step + ringAngle)) < step * 0.4
                 ChangerDisc(
                     artwork: artworks[track.id],
                     palette: palette,
-                    emphasized: atFront && !turning
+                    emphasized: atFront
                 )
                 .frame(width: discSize, height: discSize)
                 .opacity(0.28 + 0.72 * depth)
                 .offset(x: radius * cos(theta), y: radius * sin(theta))
                 .zIndex(depth * 10)
                 .allowsHitTesting(false)
-                .id("\(slot)-\(track.id)")
+                // Identity stays on track id so order never “reshuffles” visually mid-spin.
+                .id(track.id)
             }
         }
         .frame(width: diameter, height: diameter)
@@ -137,7 +169,10 @@ struct RecordDiscChanger: View {
 
     private var centerPlay: some View {
         Button {
-            guard let track = selectedTrack else { return }
+            // Commit the front preview, then hand off — platter changes only here.
+            let track = frontTrack
+            commitFrontSelection(animated: false)
+            guard let track else { return }
             Task {
                 busy = true
                 status = nil
@@ -163,17 +198,16 @@ struct RecordDiscChanger: View {
             }
         }
         .buttonStyle(.plain)
-        .disabled(busy || selectedTrack == nil)
+        .disabled(busy || frontTrack == nil)
         .offset(x: diameter * 0.02)
         .accessibilityLabel("Play")
-        .accessibilityHint("Reproduce el disco de la derecha y lo pone en el tocadiscos")
+        .accessibilityHint("Reproduce la canción seleccionada en el tocadiscos")
         .zIndex(50)
     }
 
     private var angularDrag: some Gesture {
         DragGesture(minimumDistance: 2)
             .onChanged { value in
-                // Only drag on the visible half.
                 guard value.location.x >= diameter * 0.5 else { return }
                 let center = CGPoint(x: diameter / 2, y: diameter / 2)
                 let angle = atan2(value.location.y - center.y, value.location.x - center.x) * 180 / .pi
@@ -190,13 +224,16 @@ struct RecordDiscChanger: View {
             }
             .onEnded { _ in
                 dragLastAngle = nil
-                finishTurn(cancelled: false)
+                scheduleSnap(cancelled: false)
             }
     }
 
     private func beginTurn() {
+        snapTask?.cancel()
+        snapTask = nil
         if !turning {
             turning = true
+            RecordGestureClaim.selectorActive = true
             turnOrigin = ringAngle
             samples = [(Date(), ringAngle)]
         }
@@ -205,7 +242,6 @@ struct RecordDiscChanger: View {
     private func applyTorque(_ degrees: Double) {
         guard degrees.isFinite, degrees != 0, !tracks.isEmpty else { return }
         beginTurn()
-        // Live follow — no animation lag so the ring tracks the fingers.
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
@@ -215,36 +251,57 @@ struct RecordDiscChanger: View {
         if samples.count > 12 { samples.removeFirst(samples.count - 12) }
     }
 
-    private func finishTurn(cancelled: Bool) {
-        defer {
-            turning = false
-            samples = []
-            dragLastAngle = nil
-        }
-        guard !tracks.isEmpty else {
-            ringAngle = turnOrigin
+    /// Trackpad fires `.ended` between finger strokes — debounce so we don't remap mid-browse.
+    private func scheduleSnap(cancelled: Bool) {
+        snapTask?.cancel()
+        if cancelled {
+            snapTask = nil
+            cancelTurn()
             return
         }
-        if cancelled {
-            withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) {
-                ringAngle = turnOrigin
-            }
+        snapTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            commitFrontSelection(animated: true)
+        }
+    }
+
+    private func cancelTurn() {
+        turning = false
+        RecordGestureClaim.selectorActive = false
+        samples = []
+        dragLastAngle = nil
+        withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) {
+            ringAngle = turnOrigin
+        }
+    }
+
+    /// Snap the ordered list so `selected` is the track at +X; does not touch Music / platter.
+    private func commitFrontSelection(animated: Bool) {
+        guard !tracks.isEmpty else {
+            turning = false
+            RecordGestureClaim.selectorActive = false
             return
         }
         var angle = ringAngle
         let velocity = angularVelocity()
-        if !reduceMotion, abs(velocity) > 60 {
-            angle += velocity * 0.16
+        if animated, !reduceMotion, abs(velocity) > 60 {
+            angle += velocity * 0.14
         }
-        // Negative angle advances selection (clockwise when +X is front).
-        let slotsMoved = (-angle / step).rounded()
+        let moved = Int((-angle / step).rounded())
         let count = tracks.count
-        let next = ((selected + Int(slotsMoved)) % count + count) % count
-        let animation = reduceMotion ? nil : Animation.interpolatingSpring(stiffness: 240, damping: 24)
+        let next = ((selected + moved) % count + count) % count
+        let animation = (animated && !reduceMotion)
+            ? Animation.interpolatingSpring(stiffness: 240, damping: 24)
+            : nil
         withAnimation(animation) {
             selected = next
             ringAngle = 0
         }
+        turning = false
+        RecordGestureClaim.selectorActive = false
+        samples = []
+        dragLastAngle = nil
         Task { await prefetch(around: selected) }
     }
 
@@ -268,16 +325,18 @@ struct RecordDiscChanger: View {
         defer { loading = false }
         do {
             let catalog = try await service.changerCatalog()
+            // Keep a stable ordered list for the session; only replace wholesale on reload.
             self.catalog = catalog
             if let match = catalog.tracks.firstIndex(where: {
                 $0.title == currentTitle && (currentArtist == nil || currentArtist == $0.artist)
             }) {
                 selected = match
-            } else {
+            } else if selected >= catalog.tracks.count {
                 selected = 0
             }
             ringAngle = 0
             turning = false
+            RecordGestureClaim.selectorActive = false
             await prefetch(around: selected)
         } catch {
             catalog = nil
@@ -287,6 +346,7 @@ struct RecordDiscChanger: View {
 
     private func nudgeSlots(_ delta: Int) {
         guard !tracks.isEmpty, delta != 0 else { return }
+        snapTask?.cancel()
         let count = tracks.count
         withAnimation(reduceMotion ? nil : .snappy(duration: 0.28)) {
             selected = ((selected + delta) % count + count) % count
@@ -306,6 +366,12 @@ struct RecordDiscChanger: View {
                 artworks[track.id] = image
             }
         }
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
 
@@ -339,7 +405,6 @@ private struct ChangerDisc: View {
     }
 }
 
-/// Full-diameter trackpad surface: scroll torque + rotate around the ring centre.
 private struct ChangerTurnSurface: NSViewRepresentable {
     let onTorque: (Double) -> Void
     let onFinish: (Bool) -> Void
@@ -374,30 +439,27 @@ private struct ChangerTurnSurface: NSViewRepresentable {
             super.viewDidMoveToWindow()
             guard window != nil, monitor == nil else { return }
             monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .rotate]) { [weak self] event in
-                self?.handle(event)
-                return event
+                guard let self else { return event }
+                return self.handle(event)
             }
         }
 
         func stop() {
             if active {
                 active = false
+                RecordGestureClaim.selectorActive = false
                 onFinish?(true)
             }
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
         }
 
-        private func handle(_ event: NSEvent) {
-            guard let window, event.window === window else { return }
-            if event.type == .rotate {
-                handleRotate(event)
-            } else {
-                handleScroll(event)
-            }
+        private func handle(_ event: NSEvent) -> NSEvent? {
+            guard let window, event.window === window else { return event }
+            if event.type == .rotate { return handleRotate(event) }
+            return handleScroll(event)
         }
 
-        /// Visible half = right half of this diameter×diameter view (into the player).
         private func insideVisibleHalf(_ point: CGPoint) -> Bool {
             guard bounds.width > 8, bounds.height > 8 else { return false }
             guard point.x >= bounds.midX - 2 else { return false }
@@ -406,18 +468,18 @@ private struct ChangerTurnSurface: NSViewRepresentable {
             return hypot(dx, dy) <= max(bounds.width, bounds.height) * 0.55
         }
 
-        private func handleRotate(_ event: NSEvent) {
+        private func handleRotate(_ event: NSEvent) -> NSEvent? {
             let point = convert(event.locationInWindow, from: nil)
             if event.phase.contains(.began) || event.phase.contains(.mayBegin) {
                 active = insideVisibleHalf(point)
             } else if !active, event.phase.isEmpty || event.phase.contains(.changed) {
                 active = insideVisibleHalf(point)
             }
-            guard active else { return }
+            guard active else { return event }
             if event.phase.contains(.cancelled) {
                 active = false
                 DispatchQueue.main.async { self.onFinish?(true) }
-                return
+                return nil
             }
             let degrees = Double(event.rotation)
             if degrees != 0 {
@@ -427,13 +489,13 @@ private struct ChangerTurnSurface: NSViewRepresentable {
                 active = false
                 DispatchQueue.main.async { self.onFinish?(false) }
             }
+            return nil
         }
 
-        private func handleScroll(_ event: NSEvent) {
-            guard event.hasPreciseScrollingDeltas else { return }
-            // Allow light momentum so a flick still feels physical; ignore heavy coast.
+        private func handleScroll(_ event: NSEvent) -> NSEvent? {
+            guard event.hasPreciseScrollingDeltas else { return event }
             if event.momentumPhase.contains(.changed) || event.momentumPhase.contains(.ended) {
-                return
+                return event
             }
             let point = convert(event.locationInWindow, from: nil)
             if event.phase.contains(.began) || event.phase.contains(.mayBegin) {
@@ -441,11 +503,11 @@ private struct ChangerTurnSurface: NSViewRepresentable {
             } else if !active {
                 active = insideVisibleHalf(point)
             }
-            guard active else { return }
+            guard active else { return event }
             if event.phase.contains(.cancelled) {
                 active = false
                 DispatchQueue.main.async { self.onFinish?(true) }
-                return
+                return nil
             }
             let direction: CGFloat = event.isDirectionInvertedFromDevice ? 1 : -1
             let dx = direction * event.scrollingDeltaX
@@ -453,7 +515,6 @@ private struct ChangerTurnSurface: NSViewRepresentable {
             let fromCenter = CGPoint(x: point.x - bounds.midX, y: point.y - bounds.midY)
             let span = max(Double(bounds.width), 120)
             let r2 = max(span * span * 0.12, 36)
-            // Tangential torque; gain bumped so the half-ring feels as lively as the platter.
             let degrees = Double(fromCenter.x * dy - fromCenter.y * dx) / r2 * (180 / .pi) * 1.35
             if abs(degrees) > 0.01 {
                 DispatchQueue.main.async { self.onTorque?(degrees) }
@@ -462,6 +523,7 @@ private struct ChangerTurnSurface: NSViewRepresentable {
                 active = false
                 DispatchQueue.main.async { self.onFinish?(false) }
             }
+            return nil
         }
     }
 }

@@ -57,6 +57,14 @@ struct RecordTrackpadSurface: NSViewRepresentable {
 
         private func handle(_ event: NSEvent) {
             guard enabled, let window, event.window === window else { return }
+            // Selector on the left edge claims two-finger input while turning.
+            if RecordGestureClaim.selectorActive {
+                if active {
+                    active = false
+                    onFinish?(true)
+                }
+                return
+            }
             if event.type == .rotate {
                 handleRotate(event)
                 return
