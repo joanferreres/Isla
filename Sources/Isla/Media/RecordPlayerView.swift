@@ -45,7 +45,7 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     @StateObject private var speakerBattery = BluetoothSpeakerBattery()
     @State private var artwork: NSImage?
     @State private var showsAmbiences = false
-    @State private var showsCassette = false
+    @State private var showsChanger = false
     @State private var pendingCue: PendingCue?
     @State private var swapOffset: CGFloat = 0
     @State private var swapCommit: RecordSwipe?
@@ -56,6 +56,14 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     @State private var frozenPhase = 0.0
     @State private var lastPhase = 0.0
     @State private var coastVelocity = 0.0
+    /// Mechanical hand-off when loading a disc from the changer onto the platter.
+    @State private var changerHandOff: ChangerHandOff?
+
+    private struct ChangerHandOff {
+        let outgoing: NSImage?
+        let incoming: NSImage?
+        var progress: CGFloat
+    }
 
     private struct PendingCue: Equatable {
         let trackID: String
@@ -87,14 +95,17 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
             ZStack(alignment: .trailing) {
                 HStack(spacing: diameter * 0.14 + 14) {
                     turntable(diameter: diameter, snapshot: snapshot, ticking: ticking, spinning: spinning)
+                        .overlay {
+                            changerHandOffOverlay(diameter: diameter)
+                        }
                     RecordPlayerMixer(music: music, palette: palette,
                                       active: presentation.isVisible && music.enabled)
                         .frame(width: 220)
-                        .opacity(showsCassette ? 0.22 : 1)
-                        .allowsHitTesting(!showsCassette)
+                        .opacity(showsChanger ? 0.22 : 1)
+                        .allowsHitTesting(!showsChanger)
                 }
                 .padding(.leading, diameter * 0.11)
-                .padding(.trailing, showsCassette ? 300 : 0)
+                .padding(.trailing, showsChanger ? 360 : 0)
                 VStack {
                     trackHeading(snapshot)
                     Spacer(minLength: 0)
@@ -102,35 +113,45 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                 }
                 .padding(.horizontal, 24)
                 .padding(.vertical, 14)
-                .padding(.trailing, showsCassette ? 300 : 0)
-                if showsCassette {
-                    RecordCassettePanel(
+                .padding(.trailing, showsChanger ? 360 : 0)
+                if music.enabled, !showsChanger, changerHandOff == nil {
+                    RecordDiscChangerPeek(
+                        palette: palette,
+                        artwork: artwork
+                    ) {
+                        withAnimation(reduceMotion ? nil : .snappy(duration: 0.38)) {
+                            showsChanger = true
+                        }
+                    }
+                    // Only the tip peeks past the right edge of the notch UI.
+                    .offset(x: 40)
+                    .padding(.trailing, 4)
+                    .transition(.opacity)
+                    .zIndex(15)
+                }
+                if showsChanger {
+                    RecordDiscChanger(
                         palette: palette,
                         reduceMotion: reduceMotion,
                         currentTitle: snapshot?.title,
                         currentArtist: snapshot?.artist,
                         onClose: {
                             withAnimation(reduceMotion ? nil : .snappy(duration: 0.32)) {
-                                showsCassette = false
+                                showsChanger = false
                             }
                         },
-                        onPlay: { track in
-                            do {
-                                try await music.playPlaylistTrack(track.id)
-                                return nil
-                            } catch {
-                                return error.localizedDescription
-                            }
+                        onPlay: { track, incoming in
+                            await loadDiscFromChanger(trackID: track.id, incoming: incoming)
                         }
                     )
-                    .padding(.trailing, 18)
-                    .padding(.vertical, 28)
+                    .padding(.trailing, 10)
+                    .padding(.vertical, 18)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                     .zIndex(20)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(reduceMotion ? nil : .snappy(duration: 0.34), value: showsCassette)
+            .animation(reduceMotion ? nil : .snappy(duration: 0.36), value: showsChanger)
         }
         .foregroundStyle(ink)
         .background(Color(nsColor: palette.background).ignoresSafeArea())
@@ -153,6 +174,12 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                         swapCommit = nil
                         outgoingArtwork = nil
                     }
+                    manualRotation = 0
+                    spinBias = 0
+                    coastVelocity = 0
+                } else if changerHandOff != nil {
+                    let settle = reduceMotion ? nil : Animation.snappy(duration: 0.26)
+                    withAnimation(settle) { changerHandOff = nil }
                     manualRotation = 0
                     spinBias = 0
                     coastVelocity = 0
@@ -422,17 +449,6 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                     .accessibilityValue("\(battery.percent) por ciento")
                     .help(battery.name)
             }
-            if music.enabled {
-                playerButton(tint: showsCassette ? accent : nil) {
-                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.34)) {
-                        showsCassette.toggle()
-                    }
-                } label: {
-                    Image(systemName: "cassette.fill")
-                }
-                .accessibilityLabel(showsCassette ? "Cerrar cinta" : "Abrir canciones de la cinta")
-                .help("Despliega la playlist actual como una cinta de casete")
-            }
             if let snapshot, music.enabled {
                 RecordPlaylistPicker(track: snapshot).id(snapshot.trackID)
             }
@@ -476,7 +492,8 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
         .onChange(of: presentation.isVisible) { _, visible in
             if !visible {
                 showsAmbiences = false
-                showsCassette = false
+                showsChanger = false
+                changerHandOff = nil
             }
         }
     }
@@ -563,6 +580,70 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
         guard seconds.isFinite, seconds >= 0, seconds < Double(Int.max) else { return "–:––" }
         let total = Int(seconds)
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    /// Animate the playing disc off the platter and the chosen disc onto it, then cue Music.
+    private func loadDiscFromChanger(trackID: String, incoming: NSImage?) async -> String? {
+        let outgoing = artwork
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.55)) {
+            showsChanger = false
+            changerHandOff = ChangerHandOff(outgoing: outgoing, incoming: incoming, progress: 0)
+        }
+        // Drive progress so the playing disc leaves and the chosen disc lands.
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.55)) {
+            changerHandOff = ChangerHandOff(outgoing: outgoing, incoming: incoming, progress: 1)
+        }
+        if !reduceMotion {
+            try? await Task.sleep(for: .milliseconds(520))
+        }
+        do {
+            try await music.playPlaylistTrack(trackID)
+            // Keep the incoming art parked until Music reports the new track.
+            if changerHandOff != nil {
+                artwork = incoming ?? artwork
+            }
+            return nil
+        } catch {
+            withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) {
+                changerHandOff = nil
+            }
+            return error.localizedDescription
+        }
+    }
+
+    @ViewBuilder
+    private func changerHandOffOverlay(diameter: CGFloat) -> some View {
+        if let handOff = changerHandOff {
+            let travel = diameter * 0.92
+            let size = diameter * 0.78
+            ZStack {
+                if let outgoing = handOff.outgoing {
+                    Image(nsImage: outgoing)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: size, height: size)
+                        .clipShape(Circle())
+                        .overlay(Circle().strokeBorder(.white.opacity(0.15), lineWidth: 1))
+                        .offset(x: travel * handOff.progress, y: -travel * 0.12 * handOff.progress)
+                        .opacity(1 - Double(handOff.progress))
+                        .scaleEffect(1 - 0.18 * handOff.progress)
+                        .allowsHitTesting(false)
+                }
+                if let incoming = handOff.incoming {
+                    Image(nsImage: incoming)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: size, height: size)
+                        .clipShape(Circle())
+                        .overlay(Circle().strokeBorder(.white.opacity(0.2), lineWidth: 1))
+                        .offset(x: travel * (1 - handOff.progress), y: travel * 0.08 * (1 - handOff.progress))
+                        .opacity(0.35 + 0.65 * Double(handOff.progress))
+                        .scaleEffect(0.82 + 0.18 * handOff.progress)
+                        .allowsHitTesting(false)
+                }
+            }
+            .allowsHitTesting(false)
+        }
     }
 }
 
