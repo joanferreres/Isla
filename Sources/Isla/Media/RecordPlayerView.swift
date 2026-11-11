@@ -46,8 +46,6 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     @State private var artwork: NSImage?
     @State private var showsAmbiences = false
     @State private var pendingCue: PendingCue?
-    @State private var artworkByTrack: [String: NSImage] = [:]
-    @State private var trackHistory: [String] = []
     @State private var swapOffset: CGFloat = 0
     @State private var swapCommit: RecordSwipe?
     @State private var outgoingArtwork: NSImage?
@@ -106,28 +104,16 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
         .foregroundStyle(ink)
         .background(Color(nsColor: palette.background).ignoresSafeArea())
         .preferredColorScheme(.dark)
-        .onChange(of: presentation.isVisible, initial: true) { _, visible in speakerBattery.setVisible(visible) }
+        .onChange(of: presentation.isVisible, initial: true) { _, visible in
+            speakerBattery.setVisible(visible)
+            if visible { music.ensureNeighborCovers() }
+        }
         .onDisappear { speakerBattery.setVisible(false) }
         .onChange(of: music.state.artworkData, initial: true) { _, data in
-            let image = data.flatMap(NSImage.init(data:))
-            artwork = image
-            if let image, let trackID = music.state.snapshot?.trackID {
-                artworkByTrack[trackID] = image
-            }
-        }
-        .onChange(of: music.neighborArt, initial: true) { _, neighbors in
-            if let id = neighbors.nextTrackID, let data = neighbors.nextArtwork,
-               let image = NSImage(data: data) {
-                artworkByTrack[id] = image
-            }
-            if let id = neighbors.previousTrackID, let data = neighbors.previousArtwork,
-               let image = NSImage(data: data) {
-                artworkByTrack[id] = image
-            }
+            artwork = data.flatMap(NSImage.init(data:))
         }
         .onChange(of: music.state.snapshot?.trackID, initial: true) { previous, trackID in
-            if let trackID {
-                remember(trackID)
+            if trackID != nil {
                 if swapCommit != nil {
                     // New record landed: drop the outgoing disc and centre the incoming art.
                     let settle = reduceMotion ? nil : Animation.snappy(duration: 0.28)
@@ -144,6 +130,8 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                     spinBias = 0
                     coastVelocity = 0
                 }
+                // Warm next/previous covers as soon as the landed track is known.
+                music.ensureNeighborCovers()
             }
             _ = previous
         }
@@ -286,32 +274,11 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
         music.send(.pause, trackID: snapshot.trackID)
     }
 
-    private func remember(_ trackID: String) {
-        trackHistory.removeAll { $0 == trackID }
-        trackHistory.append(trackID)
-        if trackHistory.count > 24 { trackHistory.removeFirst(trackHistory.count - 24) }
-        if artworkByTrack.count > 32 {
-            let keep = Set(trackHistory)
-            artworkByTrack = artworkByTrack.filter { keep.contains($0.key) }
-        }
-    }
-
     private func incomingArtwork(for offset: CGFloat, commit: RecordSwipe?) -> NSImage? {
+        // Prefer the eagerly decoded trail covers so the second disc is never blank
+        // while we convert Data → NSImage mid-gesture.
         let towardNext = commit.map { $0 == .next } ?? (offset < 0)
-        if towardNext {
-            if let id = music.neighborArt.nextTrackID, let image = artworkByTrack[id] { return image }
-            if let data = music.neighborArt.nextArtwork { return NSImage(data: data) }
-            // Fall back to a cover we already saw after skipping forward earlier in the session.
-            return nil
-        }
-        if let id = music.neighborArt.previousTrackID, let image = artworkByTrack[id] { return image }
-        if let data = music.neighborArt.previousArtwork { return NSImage(data: data) }
-        guard let current = music.state.snapshot?.trackID,
-              let index = trackHistory.lastIndex(of: current),
-              index > 0 else {
-            return trackHistory.dropLast().last.flatMap { artworkByTrack[$0] }
-        }
-        return artworkByTrack[trackHistory[index - 1]]
+        return towardNext ? music.nextCover : music.previousCover
     }
 
     private func incomingOffset(_ offset: CGFloat, diameter: CGFloat) -> CGFloat {

@@ -40,18 +40,36 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
  case "neighbors": source="""
  tell application "Music"
  if player state is stopped then return {}
- set cur to current track
- set curID to persistent ID of cur
+ try
+  set cur to current track
+  set curID to persistent ID of cur
+ on error
+  return {}
+ end try
+ set pl to missing value
  try
   set pl to current playlist
+ on error
+  try
+   set cont to container of cur
+   set contClass to (class of cont) as text
+   if contClass is in {"playlist", "user playlist", "library playlist", "folder playlist", "radio tuner playlist"} then
+    set pl to cont
+   end if
+  end try
+ end try
+ if pl is missing value then return {}
+ try
   set total to count of tracks of pl
   if total < 2 then return {}
   set idx to 0
   repeat with i from 1 to total
-   if persistent ID of track i of pl is equal to curID then
-    set idx to i
-    exit repeat
-   end if
+   try
+    if persistent ID of track i of pl is equal to curID then
+     set idx to i
+     exit repeat
+    end if
+   end try
   end repeat
   if idx is 0 then return {}
   set nextI to idx + 1
