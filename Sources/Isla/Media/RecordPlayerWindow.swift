@@ -125,18 +125,16 @@ private final class RecordPlayerDesktopPanel: NSPanel {
         window.collectionBehavior = [.fullScreenPrimary, .managed]
         window.appearance = NSAppearance(named: .darkAqua)
         window.titlebarAppearsTransparent = true
-        // Clear chrome so the peeking disc can hang outside the black player field.
-        window.isOpaque = false
-        window.backgroundColor = .clear
+        window.isOpaque = true
+        window.backgroundColor = presentation.palette.background
         window.selectPalette = { [weak presentation] in presentation?.select($0) }
-        presentation.onPaletteChange = { [weak window] _ in window?.backgroundColor = .clear }
+        presentation.onPaletteChange = { [weak window] in window?.backgroundColor = $0.background }
         window.delegate = self
         let hosting = IslandHostingView(rootView: RecordPlayerView(
             music: music, preferences: preferences, presentation: presentation
         ))
-        // Keep the leading peek strip visually outside the black player field.
-        hosting.wantsLayer = true
-        hosting.layer?.backgroundColor = NSColor.clear.cgColor
+        // Clip the peek disc at the content edge so only the inner blank half is visible.
+        hosting.clipsToBounds = true
         window.contentView = hosting
         window.center()
         window.setFrameAutosaveName("IslaRecordPlayer")

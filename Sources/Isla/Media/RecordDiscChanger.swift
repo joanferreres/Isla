@@ -314,18 +314,16 @@ private struct ChangerTrackpadWheel: NSViewRepresentable {
     }
 }
 
-/// Disc tip that hangs half outside the black player field — press to open the changer.
-/// The protruding (leading) half is blank vinyl; cover art stays on the inner half only.
+/// Blank vinyl disc centered on the window’s leading edge — the left half is clipped
+/// off-screen; only the coverless right half remains visible and hittable.
 struct RecordDiscChangerPeek: View {
     let palette: RecordPlayerPalette
-    let artwork: NSImage?
     let diameter: CGFloat
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             ZStack {
-                // Full blank vinyl — this is what sticks outside the screen.
                 Circle()
                     .fill(
                         RadialGradient(
@@ -339,32 +337,22 @@ struct RecordDiscChangerPeek: View {
                             endRadius: diameter * 0.52
                         )
                     )
-                // Subtle groove rings on the outer vinyl half.
-                ForEach(0..<4, id: \.self) { index in
+                ForEach(0..<5, id: \.self) { index in
                     Circle()
-                        .strokeBorder(Color.white.opacity(0.04 + Double(index) * 0.01), lineWidth: 0.6)
-                        .frame(width: diameter * (0.55 + CGFloat(index) * 0.1),
-                               height: diameter * (0.55 + CGFloat(index) * 0.1))
+                        .strokeBorder(Color.white.opacity(0.035 + Double(index) * 0.012), lineWidth: 0.7)
+                        .frame(width: diameter * (0.42 + CGFloat(index) * 0.1),
+                               height: diameter * (0.42 + CGFloat(index) * 0.1))
                 }
-                // Cover art only on the trailing (inner) semicircle.
-                if let artwork {
-                    Image(nsImage: artwork)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: diameter, height: diameter)
-                        .clipShape(Circle())
-                        .mask(alignment: .trailing) {
-                            Rectangle()
-                                .frame(width: diameter * 0.5, height: diameter)
-                        }
-                }
+                // Spindle sits on the clip boundary (center of the full disc).
                 Circle().fill(.black).frame(width: max(5, diameter * 0.08), height: max(5, diameter * 0.08))
             }
             .frame(width: diameter, height: diameter)
             .overlay(Circle().strokeBorder(.white.opacity(0.22), lineWidth: 1))
-            .shadow(color: .black.opacity(0.45), radius: 10, x: 3, y: 2)
+            .shadow(color: .black.opacity(0.35), radius: 8, x: 4, y: 2)
         }
         .buttonStyle(.plain)
+        // Only the on-screen half receives clicks.
+        .contentShape(Path(CGRect(x: diameter * 0.5, y: 0, width: diameter * 0.5, height: diameter)))
         .accessibilityLabel("Abrir cambiador de discos")
         .help("Saca el cambiador de discos de la playlist")
     }

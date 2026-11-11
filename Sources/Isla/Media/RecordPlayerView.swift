@@ -88,11 +88,10 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
 
     var body: some View {
         GeometryReader { proxy in
-            // Half the peek hangs outside the black field over the clear window strip.
-            let peekDiameter: CGFloat = 90
-            let peekOutside = peekDiameter * 0.5
+            // Peek disc is centered on the window’s left edge; clipsToBounds hides the outer half.
+            let peekDiameter: CGFloat = 96
             let changerWidth: CGFloat = 328
-            let leadingReserve = showsChanger ? changerWidth : (music.enabled ? peekOutside : 0)
+            let leadingReserve = showsChanger ? changerWidth : 0
             let diameter = max(120, min(660,
                                         (proxy.size.width - 294 - leadingReserve) / 1.22,
                                         (proxy.size.height - 176) / 1.22))
@@ -100,7 +99,6 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
             let ticking = presentation.isVisible && music.enabled && snapshot?.playing == true
             let spinning = ticking && !reduceMotion
             ZStack(alignment: .leading) {
-                // Black player field — inset so the peek can protrude into clear chrome.
                 ZStack {
                     HStack(spacing: diameter * 0.14 + 14) {
                         turntable(diameter: diameter, snapshot: snapshot, ticking: ticking, spinning: spinning)
@@ -124,20 +122,15 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.leading, leadingReserve)
-                .background(Color(nsColor: palette.background))
 
                 if music.enabled, !showsChanger, changerHandOff == nil {
-                    // Disc spans [0, peekDiameter]; black field starts at mid-disc → half outside.
-                    RecordDiscChangerPeek(
-                        palette: palette,
-                        artwork: artwork,
-                        diameter: peekDiameter
-                    ) {
+                    // Center on the leading edge → left half falls outside and is window-clipped.
+                    RecordDiscChangerPeek(palette: palette, diameter: peekDiameter) {
                         withAnimation(reduceMotion ? nil : .snappy(duration: 0.38)) {
                             showsChanger = true
                         }
                     }
-                    .offset(x: 0)
+                    .offset(x: -peekDiameter * 0.5)
                     .frame(maxHeight: .infinity, alignment: .center)
                     .transition(.opacity)
                     .zIndex(30)
@@ -161,7 +154,6 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                     .padding(.leading, 12)
                     .padding(.vertical, 24)
                     .frame(maxHeight: .infinity, alignment: .center)
-                    .background(Color(nsColor: palette.background))
                     .transition(.move(edge: .leading).combined(with: .opacity))
                     .zIndex(25)
                 }
@@ -170,6 +162,7 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
             .animation(reduceMotion ? nil : .snappy(duration: 0.36), value: showsChanger)
         }
         .foregroundStyle(ink)
+        .background(Color(nsColor: palette.background).ignoresSafeArea())
         .preferredColorScheme(.dark)
         .onChange(of: presentation.isVisible, initial: true) { _, visible in
             speakerBattery.setVisible(visible)
