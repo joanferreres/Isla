@@ -118,12 +118,15 @@ actor MusicEqualizer {
         let live = try findControls()
         try setEnabled(true, on: live.toggle)
         let confirmed = try findControls()
+        parkEqualizerWindows()
         return confirmed.gains(for: confirmed.values)
     }
 
     func reset() async throws -> [MixerBand: Double] {
         let controls = try await openControlsIfNeeded()
-        return try apply(0, to: controls.sliders.indices, enabled: false, controls: controls)
+        let result = try apply(0, to: controls.sliders.indices, enabled: false, controls: controls)
+        parkEqualizerWindows()
+        return result
     }
 
     private func apply(_ gain: Double, to indices: Range<Int>, enabled: Bool, controls: Controls) throws -> [MixerBand: Double] {
@@ -168,6 +171,7 @@ actor MusicEqualizer {
             try? setEnabled(originalSwitch == 1, on: live.toggle)
             throw error
         }
+        parkEqualizerWindows()
         return live.gains(for: values)
     }
 
@@ -180,14 +184,48 @@ actor MusicEqualizer {
     }
 
     private func openControlsIfNeeded() async throws -> Controls {
-        do { return try findControls() }
-        catch Failure.closed {
+        do {
+            let controls = try findControls()
+            parkEqualizerWindows()
+            return controls
+        } catch Failure.closed {
             let pressed = try openFromMenu()
-            if pressed, let controls = try await waitForControls(attempts: 5) { return controls }
+            if pressed, let controls = try await waitForControls(attempts: 5) {
+                parkEqualizerWindows()
+                return controls
+            }
             try openWithShortcut()
-            if let controls = try await waitForControls(attempts: 8) { return controls }
+            if let controls = try await waitForControls(attempts: 8) {
+                parkEqualizerWindows()
+                return controls
+            }
             throw Failure.closed
         }
+    }
+
+    /// Keep Music’s native Equalizer window off-screen so Isla is the only visible EQ UI.
+    /// EQ On / preset state persists while the window is hidden or closed.
+    private func parkEqualizerWindows() {
+        guard let app = try? musicApplication() else { return }
+        for window in elements(app, kAXWindowsAttribute) where isEqualizerWindow(window) {
+            _ = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+            var point = CGPoint(x: -12_000, y: -12_000)
+            if let value = AXValueCreate(.cgPoint, &point) {
+                _ = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, value)
+            }
+        }
+    }
+
+    private func isEqualizerWindow(_ window: AXUIElement) -> Bool {
+        let title = ((attribute(window, kAXTitleAttribute) as? String) ?? "").lowercased()
+        if ["equalizer", "equaliser", "ecualizador", "equalitzador"].contains(where: { title.contains($0) }) {
+            return true
+        }
+        let children = elements(window, kAXChildrenAttribute)
+        let sliders = children.filter { role($0) == kAXSliderRole }
+        return sliders.count == 11
+            && children.contains(where: { role($0) == kAXPopUpButtonRole })
+            && children.contains(where: { role($0) == kAXCheckBoxRole })
     }
 
     private func openFromMenu() throws -> Bool {
@@ -223,9 +261,15 @@ actor MusicEqualizer {
 
     private func waitForControls(attempts: Int) async throws -> Controls? {
         for _ in 0..<attempts {
-            try await Task.sleep(for: .milliseconds(120))
-            do { return try findControls() }
-            catch Failure.closed { continue }
+            try await Task.sleep(for: .milliseconds(80))
+            do {
+                let controls = try findControls()
+                parkEqualizerWindows()
+                return controls
+            } catch Failure.closed {
+                parkEqualizerWindows()
+                continue
+            }
         }
         return nil
     }

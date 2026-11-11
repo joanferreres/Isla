@@ -19,6 +19,10 @@ struct RecordDiscChanger: View {
     @State private var artworks: [String: NSImage] = [:]
     @State private var busy = false
     @State private var status: String?
+    @State private var showPlaylists = false
+    @State private var playlists: [MusicPlaylist]?
+    @State private var playlistError: String?
+    @State private var startingPlaylist: String?
     @GestureState private var dragAngle: Double = 0
 
     private let slotCount = 6
@@ -38,11 +42,17 @@ struct RecordDiscChanger: View {
                 if loading {
                     ProgressView().controlSize(.small)
                 } else if tracks.isEmpty {
-                    Text(error ?? "No hay discos para cargar ahora.")
-                        .font(.callout)
-                        .foregroundStyle(palette.ink.opacity(0.7))
-                        .multilineTextAlignment(.center)
-                        .padding(20)
+                    VStack(spacing: 10) {
+                        Text(error ?? "No hay discos para cargar ahora.")
+                            .font(.callout)
+                            .foregroundStyle(palette.ink.opacity(0.7))
+                            .multilineTextAlignment(.center)
+                        Button("Elegir playlist") { showPlaylists = true }
+                            .buttonStyle(.borderedProminent)
+                            .tint(palette.accent)
+                            .controlSize(.small)
+                    }
+                    .padding(20)
                 } else {
                     carousel
                     centerPlay
@@ -67,6 +77,9 @@ struct RecordDiscChanger: View {
         }
         .frame(width: 312)
         .task { await reload() }
+        .popover(isPresented: $showPlaylists, arrowEdge: .leading) {
+            playlistPicker
+        }
     }
 
     private var trayChrome: some View {
@@ -79,7 +92,64 @@ struct RecordDiscChanger: View {
             .buttonStyle(.borderless)
             .accessibilityLabel("Guardar cambiador")
             Spacer(minLength: 0)
+            Button {
+                showPlaylists = true
+            } label: {
+                Image(systemName: "music.note.list")
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Cambiar playlist en reproducción")
+            .help("Elige otra playlist y ponla a sonar; el cambiador se recarga con ella")
+            .disabled(busy || startingPlaylist != nil)
         }
+    }
+
+    private var playlistPicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Reproducir playlist").font(.headline)
+            Text("Sustituye la cola actual y recarga el cambiador.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let playlists, !playlists.isEmpty {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(playlists) { playlist in
+                            Button {
+                                start(playlist)
+                            } label: {
+                                HStack {
+                                    Text(playlist.name).lineLimit(1)
+                                    Spacer()
+                                    if startingPlaylist == playlist.id {
+                                        ProgressView().controlSize(.small)
+                                    }
+                                }
+                                .padding(.horizontal, 6)
+                                .frame(minHeight: 34)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(startingPlaylist != nil)
+                        }
+                    }
+                }
+                .frame(height: min(260, CGFloat(playlists.count) * 34))
+            } else if playlists?.isEmpty == true {
+                Text("No hay playlists editables en Música.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else if playlistError == nil {
+                ProgressView("Cargando playlists…").controlSize(.small)
+            }
+            if let playlistError {
+                Text(playlistError).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .frame(width: 280, alignment: .leading)
+        .task { await loadPlaylists() }
     }
 
     private var trayWell: some View {
@@ -212,6 +282,34 @@ struct RecordDiscChanger: View {
         } catch {
             catalog = nil
             self.error = error.localizedDescription
+        }
+    }
+
+    private func loadPlaylists() async {
+        playlistError = nil
+        do {
+            playlists = try await service.playlists()
+        } catch {
+            playlistError = error.localizedDescription
+        }
+    }
+
+    private func start(_ playlist: MusicPlaylist) {
+        startingPlaylist = playlist.id
+        playlistError = nil
+        status = nil
+        Task {
+            defer { startingPlaylist = nil }
+            do {
+                try await service.playPlaylist(playlist)
+                showPlaylists = false
+                status = "Sonando: \(playlist.name)"
+                // Give Music a moment to switch the queue before reloading discs.
+                try? await Task.sleep(for: .milliseconds(350))
+                await reload()
+            } catch {
+                playlistError = error.localizedDescription
+            }
         }
     }
 

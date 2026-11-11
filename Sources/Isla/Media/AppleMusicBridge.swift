@@ -149,8 +149,8 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
  case "upcomingTracks": source="""
  tell application "Music"
  if player state is stopped then return {}
- set rows to {"Próximas"}
- set seen to {}
+ set rows to {"Proximas"}
+ set seenIDs to {}
  try
   set cur to current track
   set cid to persistent ID of cur
@@ -161,7 +161,7 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
   on error
    set end of rows to ""
   end try
-  set end of seen to cid
+  set end of seenIDs to cid
  on error
   return {}
  end try
@@ -188,12 +188,12 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
     end try
    end repeat
    if idx is not 0 and total > 1 then
-    repeat with offset from 1 to 12
-     set j to ((idx + offset - 1) mod total) + 1
+    repeat with stepIndex from 1 to 12
+     set j to ((idx + stepIndex - 1) mod total) + 1
      set t to track j of pl
      set tid to persistent ID of t
-     if tid is not in seen then
-      set end of seen to tid
+     if tid is not in seenIDs then
+      set end of seenIDs to tid
       set end of rows to tid
       set end of rows to name of t
       try
@@ -202,22 +202,21 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
        set end of rows to ""
       end try
      end if
-     if (count of seen) ≥ 12 then exit repeat
+     if (count of seenIDs) >= 12 then exit repeat
     end repeat
    end if
   end try
  end if
- set need to 6 - (count of seen)
+ set need to 8 - (count of seenIDs)
  if need > 0 then
   try
    set lib to library playlist 1
-   set libCount to count of tracks of lib
-   if libCount > 0 then
-    repeat with n from 1 to (need * 4)
+   if (count of tracks of lib) > 0 then
+    repeat with n from 1 to (need * 5)
      set t to some track of lib
      set tid to persistent ID of t
-     if tid is not in seen then
-      set end of seen to tid
+     if tid is not in seenIDs then
+      set end of seenIDs to tid
       set end of rows to tid
       set end of rows to name of t
       try
@@ -226,12 +225,52 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
        set end of rows to ""
       end try
       set need to need - 1
-      if need ≤ 0 then exit repeat
+      if need <= 0 then exit repeat
      end if
     end repeat
    end if
   end try
  end if
+ return rows
+ end tell
+ """
+ case "librarySample": source="""
+ tell application "Music"
+ set rows to {"Biblioteca"}
+ set seenIDs to {}
+ try
+  if player state is not stopped then
+   set cur to current track
+   set cid to persistent ID of cur
+   set end of rows to cid
+   set end of rows to name of cur
+   try
+    set end of rows to artist of cur
+   on error
+    set end of rows to ""
+   end try
+   set end of seenIDs to cid
+  end if
+ end try
+ try
+  set lib to library playlist 1
+  if (count of tracks of lib) is 0 then return rows
+  repeat with n from 1 to 40
+   set t to some track of lib
+   set tid to persistent ID of t
+   if tid is not in seenIDs then
+    set end of seenIDs to tid
+    set end of rows to tid
+    set end of rows to name of t
+    try
+     set end of rows to artist of t
+    on error
+     set end of rows to ""
+    end try
+   end if
+   if (count of seenIDs) >= 8 then exit repeat
+  end repeat
+ end try
  return rows
  end tell
  """
@@ -308,7 +347,7 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
   neighbors.previousTrackID = descriptor.atIndex(3)?.stringValue
   if let data = descriptor.atIndex(4)?.data, NSImage(data: data) != nil { neighbors.previousArtwork = data }
   if neighbors.nextTrackID != nil || neighbors.previousTrackID != nil { reply.neighbors = neighbors }
- } else if operation == "playlistTracks" || operation == "upcomingTracks",
+ } else if operation == "playlistTracks" || operation == "upcomingTracks" || operation == "librarySample",
            let descriptor, descriptor.numberOfItems >= 1 {
   let name = descriptor.atIndex(1)?.stringValue ?? (operation == "upcomingTracks" ? "Próximas" : "Playlist")
   var tracks:[MusicCassetteTrack] = []

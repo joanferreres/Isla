@@ -457,6 +457,14 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                     .accessibilityValue("\(battery.percent) por ciento")
                     .help(battery.name)
             }
+            if music.enabled {
+                RecordQueuePlaylistButton {
+                    // Opening the changer after a queue switch surfaces the new discs.
+                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.34)) {
+                        showsChanger = true
+                    }
+                }
+            }
             if let snapshot, music.enabled {
                 RecordPlaylistPicker(track: snapshot).id(snapshot.trackID)
             }

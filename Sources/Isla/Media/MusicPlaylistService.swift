@@ -30,7 +30,16 @@ actor MusicPlaylistService {
            !catalog.tracks.isEmpty {
             return catalog
         }
-        throw MusicFailure(message: "Música no tiene canciones próximas para el cambiador ahora mismo.")
+        // Hard fallback: streaming often has no current playlist (-1728); sample the library.
+        if let catalog = try await bridge.query("librarySample").playlistCatalog,
+           !catalog.tracks.isEmpty {
+            return catalog
+        }
+        throw MusicFailure(message: "Música no tiene canciones en la biblioteca para el cambiador.")
+    }
+
+    func playPlaylist(_ playlist: MusicPlaylist) async throws {
+        _ = try await bridge.query("playPlaylist", argument: playlist.id)
     }
 
     func play(trackID: String) async throws {
