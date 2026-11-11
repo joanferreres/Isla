@@ -45,7 +45,8 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     @StateObject private var speakerBattery = BluetoothSpeakerBattery()
     @State private var artwork: NSImage?
     @State private var showsAmbiences = false
-    @State private var showsChanger = false
+    @State private var changerEpoch = 0
+    @State private var shuffling = false
     @State private var pendingCue: PendingCue?
     @State private var swapOffset: CGFloat = 0
     @State private var swapCommit: RecordSwipe?
@@ -88,12 +89,10 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
 
     var body: some View {
         GeometryReader { proxy in
-            // Peek disc is centered on the window’s left edge; clipsToBounds hides the outer half.
-            let peekDiameter: CGFloat = 96
-            let changerWidth: CGFloat = 328
-            let leadingReserve = showsChanger ? changerWidth : 0
+            // Half the disc selector sits outside the left window edge (clipsToBounds).
+            let selectorDiameter: CGFloat = min(320, max(220, proxy.size.height * 0.55))
             let diameter = max(120, min(660,
-                                        (proxy.size.width - 294 - leadingReserve) / 1.22,
+                                        (proxy.size.width - 294 - selectorDiameter * 0.35) / 1.22,
                                         (proxy.size.height - 176) / 1.22))
             let snapshot = music.state.snapshot
             let ticking = presentation.isVisible && music.enabled && snapshot?.playing == true
@@ -108,10 +107,8 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                         RecordPlayerMixer(music: music, palette: palette,
                                           active: presentation.isVisible && music.enabled)
                             .frame(width: 220)
-                            .opacity(showsChanger ? 0.35 : 1)
-                            .allowsHitTesting(!showsChanger)
                     }
-                    .padding(.leading, diameter * 0.08)
+                    .padding(.leading, max(diameter * 0.08, selectorDiameter * 0.28))
                     VStack {
                         trackHeading(snapshot)
                         Spacer(minLength: 0)
@@ -121,45 +118,26 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                     .padding(.vertical, 14)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.leading, leadingReserve)
 
-                if music.enabled, !showsChanger, changerHandOff == nil {
-                    // Center on the leading edge → left half falls outside and is window-clipped.
-                    RecordDiscChangerPeek(palette: palette, diameter: peekDiameter) {
-                        withAnimation(reduceMotion ? nil : .snappy(duration: 0.38)) {
-                            showsChanger = true
-                        }
-                    }
-                    .offset(x: -peekDiameter * 0.5)
-                    .frame(maxHeight: .infinity, alignment: .center)
-                    .transition(.opacity)
-                    .zIndex(30)
-                }
-
-                if showsChanger {
+                if music.enabled, changerHandOff == nil {
                     RecordDiscChanger(
                         palette: palette,
                         reduceMotion: reduceMotion,
+                        diameter: selectorDiameter,
                         currentTitle: snapshot?.title,
                         currentArtist: snapshot?.artist,
-                        onClose: {
-                            withAnimation(reduceMotion ? nil : .snappy(duration: 0.32)) {
-                                showsChanger = false
-                            }
-                        },
                         onPlay: { track, incoming in
                             await loadDiscFromChanger(trackID: track.id, incoming: incoming)
                         }
                     )
-                    .padding(.leading, 12)
-                    .padding(.vertical, 24)
+                    .id(changerEpoch)
+                    // Center on the leading edge → only the inner half stays on-screen.
+                    .offset(x: -selectorDiameter * 0.5)
                     .frame(maxHeight: .infinity, alignment: .center)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
-                    .zIndex(25)
+                    .zIndex(30)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(reduceMotion ? nil : .snappy(duration: 0.36), value: showsChanger)
         }
         .foregroundStyle(ink)
         .background(Color(nsColor: palette.background).ignoresSafeArea())
@@ -458,11 +436,9 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                     .help(battery.name)
             }
             if music.enabled {
+                shuffleButton
                 RecordQueuePlaylistButton {
-                    // Opening the changer after a queue switch surfaces the new discs.
-                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.34)) {
-                        showsChanger = true
-                    }
+                    changerEpoch += 1
                 }
             }
             if let snapshot, music.enabled {
@@ -508,9 +484,43 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
         .onChange(of: presentation.isVisible) { _, visible in
             if !visible {
                 showsAmbiences = false
-                showsChanger = false
                 changerHandOff = nil
             }
+        }
+    }
+
+    @ViewBuilder private var shuffleButton: some View {
+        let button = Button {
+            guard !shuffling else { return }
+            shuffling = true
+            Task {
+                defer { shuffling = false }
+                do {
+                    try await MusicPlaylistService().playShuffle()
+                    music.error = nil
+                    changerEpoch += 1
+                } catch {
+                    music.error = error.localizedDescription
+                }
+            }
+        } label: {
+            Group {
+                if shuffling {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "shuffle")
+                }
+            }
+            .frame(minWidth: 24, minHeight: 32)
+        }
+        .buttonBorderShape(.capsule)
+        .disabled(shuffling)
+        .accessibilityLabel("Reproducir aleatorio")
+        .help("Activa el shuffle de Música y pone a sonar una canción al azar")
+        if #available(macOS 26.0, *), !reduceTransparency {
+            button.buttonStyle(.glass)
+        } else {
+            button.buttonStyle(.bordered)
         }
     }
 
@@ -602,7 +612,6 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     private func loadDiscFromChanger(trackID: String, incoming: NSImage?) async -> String? {
         let outgoing = artwork
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.55)) {
-            showsChanger = false
             changerHandOff = ChangerHandOff(outgoing: outgoing, incoming: incoming, progress: 0)
         }
         // Drive progress so the playing disc leaves and the chosen disc lands.

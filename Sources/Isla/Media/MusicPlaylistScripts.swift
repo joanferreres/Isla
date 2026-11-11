@@ -17,11 +17,27 @@ struct MusicPlaylistRequest: Codable, Sendable {
 
 @MainActor enum MusicPlaylistScripts {
     static func run(_ operation: String, argument: String?) -> MusicReply? {
-        guard ["playlists", "playlistContainsTrack", "playlistAddTrack", "playPlaylist"].contains(operation) else { return nil }
+        guard ["playlists", "playlistContainsTrack", "playlistAddTrack", "playPlaylist", "playShuffle"].contains(operation) else { return nil }
         guard !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Music").isEmpty else {
             return MusicReply(error: "Abre Música para ver tus playlists.")
         }
         do {
+            if operation == "playShuffle" {
+                _ = try execute("""
+                tell application "Music"
+                    set shuffle enabled to true
+                    set shuffle mode to songs
+                    try
+                        set pl to current playlist
+                        play pl
+                    on error
+                        set t to some track of library playlist 1
+                        play t
+                    end try
+                end tell
+                """)
+                return MusicReply()
+            }
             if operation == "playPlaylist" {
                 guard let argument, validID(argument) else {
                     throw MusicFailure(message: "No se pudo identificar la playlist.")

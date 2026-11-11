@@ -42,6 +42,11 @@ actor MusicPlaylistService {
         _ = try await bridge.query("playPlaylist", argument: playlist.id)
     }
 
+    /// Enable Music shuffle and start a random song (current playlist if any, else library).
+    func playShuffle() async throws {
+        _ = try await bridge.query("playShuffle")
+    }
+
     func play(trackID: String) async throws {
         let reply = try await bridge.query("playTrack", argument: trackID)
         guard reply.artworkTrackID == trackID else {
