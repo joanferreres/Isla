@@ -247,7 +247,9 @@ private struct EQKnob: View {
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 3)
                 .updating($adjustment) { drag, preview, _ in
-                    preview = min(12, max(-12, (gain ?? 0) + delta(drag.translation)))
+                    // Snap the preview to whole dB so releasing never visually
+                    // jumps from a fractional drag back to the committed value.
+                    preview = min(12, max(-12, (gain ?? 0) + delta(drag.translation))).rounded()
                 }
                 .onEnded { drag in
                     let target = min(12, max(-12, (gain ?? 0) + delta(drag.translation))).rounded()

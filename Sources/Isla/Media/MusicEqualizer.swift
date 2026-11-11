@@ -79,33 +79,47 @@ actor MusicEqualizer {
 
     private func apply(_ gain: Double, to indices: Range<Int>, enabled: Bool, controls: Controls) throws -> [MixerBand: Double] {
         guard let originalSwitch = number(controls.toggle, kAXValueAttribute) else { throw Failure.unresponsive }
-        let nativeGain = controls.scale.nativeValue(gain)
-        let changed = indices.filter { controls.values[$0] != nativeGain }
-        var values = controls.values
+        // Enabling first preserves Music's selected curve. Cycling the switch
+        // after a write can reload the preset and undo the user's adjustment.
+        // Re-resolve controls afterwards: toggling can rebuild the equalizer AX tree
+        // and leave the previous slider references unable to accept writes.
         do {
-            // Enabling first preserves Music's selected curve. Cycling the switch
-            // after a write can reload the preset and undo the user's adjustment.
             try setEnabled(enabled, on: controls.toggle)
+        } catch {
+            try? setEnabled(originalSwitch == 1, on: controls.toggle)
+            throw error
+        }
+        let live: Controls
+        do {
+            live = try findControls()
+        } catch {
+            try? setEnabled(originalSwitch == 1, on: controls.toggle)
+            throw error
+        }
+        let nativeGain = live.scale.nativeValue(gain)
+        let changed = indices.filter { live.values[$0] != nativeGain }
+        var values = live.values
+        do {
             for index in changed {
-                let slider = controls.sliders[index]
+                let slider = live.sliders[index]
                 guard AXUIElementSetAttributeValue(slider, kAXValueAttribute as CFString, NSNumber(value: nativeGain)) == .success else {
                     throw Failure.unresponsive
                 }
             }
             for index in changed {
-                guard let actual = number(controls.sliders[index], kAXValueAttribute),
-                      abs(controls.scale.decibels(actual) - gain) < 0.1 else { throw Failure.unresponsive }
+                guard let actual = number(live.sliders[index], kAXValueAttribute),
+                      abs(live.scale.decibels(actual) - gain) <= 0.51 else { throw Failure.unresponsive }
                 values[index] = actual
             }
         } catch {
             for index in changed {
-                _ = AXUIElementSetAttributeValue(controls.sliders[index], kAXValueAttribute as CFString,
-                                                 NSNumber(value: controls.values[index]))
+                _ = AXUIElementSetAttributeValue(live.sliders[index], kAXValueAttribute as CFString,
+                                                 NSNumber(value: live.values[index]))
             }
-            try? setEnabled(originalSwitch == 1, on: controls.toggle)
+            try? setEnabled(originalSwitch == 1, on: live.toggle)
             throw error
         }
-        return controls.gains(for: values)
+        return live.gains(for: values)
     }
 
     private func setEnabled(_ enabled: Bool, on toggle: AXUIElement) throws {

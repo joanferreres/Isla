@@ -16,7 +16,8 @@ struct RecordSwipeGesture: ViewModifier {
     func body(content: Content) -> some View {
         content
             .keyframeAnimator(initialValue: CGFloat.zero, trigger: flick) { record, recoil in
-                let offset = reduceMotion ? 0 : translation + trackpadOffset + recoil * direction * diameter
+                // Keep finger-following even with Reduce Motion; only the automatic recoil is optional.
+                let offset = translation + trackpadOffset + (reduceMotion ? 0 : recoil * direction * diameter)
                 record
                     .rotationEffect(.degrees(Double(offset / diameter) * 18))
                     .offset(x: offset)

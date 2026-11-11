@@ -117,21 +117,23 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
 
     private func turntable(diameter: CGFloat, snapshot: MediaSnapshot?, ticking: Bool, spinning: Bool) -> some View {
         let width = diameter * RecordCue.armWidth
-        return TimelineView(.animation(minimumInterval: spinning ? 1.0 / 60 : 1, paused: !spinning)) { context in
+        // Stay scheduled while audio is playing so the tonearm/progress keep moving.
+        // Spin and waves still freeze when Reduce Motion is on.
+        return TimelineView(.animation(minimumInterval: spinning ? 1.0 / 60 : 1, paused: !ticking)) { context in
             let elapsed = playbackSeconds(snapshot, at: context.date)
             let duration = snapshot?.duration ?? 0
             let progress = duration > 0 ? min(1, elapsed / duration) : 0
-            let phase = elapsed.truncatingRemainder(dividingBy: 3.6) * 100
+            let phase = spinning ? elapsed.truncatingRemainder(dividingBy: 3.6) * 100 : 0
             let playing = snapshot?.playing == true
             ZStack {
                 if ticking {
                     RecordSoundWaves(diameter: diameter,
-                                     elapsed: reduceMotion ? 0.8 : elapsed,
+                                     elapsed: spinning ? elapsed : 0.8,
                                      accent: accent)
                         .frame(width: diameter * 1.22, height: diameter * 1.22)
                         .allowsHitTesting(false)
                 }
-                VinylRecord(artwork: artwork, palette: palette, rotation: reduceMotion ? 0 : phase)
+                VinylRecord(artwork: artwork, palette: palette, rotation: phase)
                     .frame(width: diameter, height: diameter)
             }
                 .frame(width: diameter, height: diameter)
@@ -467,11 +469,12 @@ struct VinylRecord: View {
                 }
                 .frame(width: size * 0.36, height: size * 0.36)
                 .clipShape(Circle())
-                .rotationEffect(.degrees(rotation))
                 .overlay(Circle().strokeBorder(.black.opacity(0.45), lineWidth: 1))
                 Circle().fill(.black).frame(width: size * 0.022, height: size * 0.022)
                     .overlay(Circle().strokeBorder(.white.opacity(0.3), lineWidth: 1))
             }
+            // Rotate the whole platter so the label and grooves move together.
+            .rotationEffect(.degrees(rotation))
         }
     }
 }

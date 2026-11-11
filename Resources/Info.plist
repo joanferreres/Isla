@@ -6,8 +6,8 @@
 <key>CFBundleIconFile</key><string>Isla</string>
 <key>CFBundleName</key><string>Isla</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.8.42</string>
-<key>CFBundleVersion</key><string>72</string>
+<key>CFBundleShortVersionString</key><string>0.8.43</string>
+<key>CFBundleVersion</key><string>73</string>
 <key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>local.personal.isla</string><key>CFBundleURLSchemes</key><array><string>isla</string></array></dict></array>
 <key>LSUIElement</key><true/>
 <key>LSMinimumSystemVersion</key><string>15.0</string>
