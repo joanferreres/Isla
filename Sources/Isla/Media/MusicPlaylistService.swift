@@ -20,6 +20,19 @@ actor MusicPlaylistService {
         return catalog
     }
 
+    /// Playlist tracks when available; otherwise upcoming neighbors / random library picks.
+    func changerCatalog() async throws -> MusicPlaylistCatalog {
+        if let catalog = try? await bridge.query("playlistTracks").playlistCatalog,
+           !catalog.tracks.isEmpty {
+            return catalog
+        }
+        if let catalog = try? await bridge.query("upcomingTracks").playlistCatalog,
+           !catalog.tracks.isEmpty {
+            return catalog
+        }
+        throw MusicFailure(message: "Música no tiene canciones próximas para el cambiador ahora mismo.")
+    }
+
     func play(trackID: String) async throws {
         let reply = try await bridge.query("playTrack", argument: trackID)
         guard reply.artworkTrackID == trackID else {

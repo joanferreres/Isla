@@ -38,7 +38,7 @@ struct RecordDiscChanger: View {
                 if loading {
                     ProgressView().controlSize(.small)
                 } else if tracks.isEmpty {
-                    Text(error ?? "Música no expone una playlist con discos ahora.")
+                    Text(error ?? "No hay discos para cargar ahora.")
                         .font(.callout)
                         .foregroundStyle(palette.ink.opacity(0.7))
                         .multilineTextAlignment(.center)
@@ -78,10 +78,6 @@ struct RecordDiscChanger: View {
             }
             .buttonStyle(.borderless)
             .accessibilityLabel("Guardar cambiador")
-            Text((catalog?.name ?? "Cambiador").uppercased())
-                .font(.caption2.weight(.bold))
-                .tracking(1.2)
-                .foregroundStyle(palette.metal)
             Spacer(minLength: 0)
         }
     }
@@ -203,12 +199,14 @@ struct RecordDiscChanger: View {
         error = nil
         defer { loading = false }
         do {
-            let catalog = try await service.currentCatalog()
+            let catalog = try await service.changerCatalog()
             self.catalog = catalog
             if let match = catalog.tracks.firstIndex(where: {
                 $0.title == currentTitle && (currentArtist == nil || currentArtist == $0.artist)
             }) {
                 selected = match
+            } else {
+                selected = 0
             }
             await prefetch(around: selected)
         } catch {

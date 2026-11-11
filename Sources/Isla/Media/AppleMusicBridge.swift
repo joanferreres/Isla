@@ -124,7 +124,7 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
   try
    set cont to container of current track
    set contClass to (class of cont) as text
-   if contClass is in {"playlist", "user playlist", "library playlist", "folder playlist"} then set pl to cont
+   if contClass is in {"playlist", "user playlist", "library playlist", "folder playlist", "radio tuner playlist"} then set pl to cont
   end try
  end try
  if pl is missing value then return {}
@@ -143,6 +143,95 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
    set end of rows to ""
   end try
  end repeat
+ return rows
+ end tell
+ """
+ case "upcomingTracks": source="""
+ tell application "Music"
+ if player state is stopped then return {}
+ set rows to {"Próximas"}
+ set seen to {}
+ try
+  set cur to current track
+  set cid to persistent ID of cur
+  set end of rows to cid
+  set end of rows to name of cur
+  try
+   set end of rows to artist of cur
+  on error
+   set end of rows to ""
+  end try
+  set end of seen to cid
+ on error
+  return {}
+ end try
+ set pl to missing value
+ try
+  set pl to current playlist
+ on error
+  try
+   set cont to container of current track
+   set contClass to (class of cont) as text
+   if contClass is in {"playlist", "user playlist", "library playlist", "folder playlist", "radio tuner playlist"} then set pl to cont
+  end try
+ end try
+ if pl is not missing value then
+  try
+   set total to count of tracks of pl
+   set idx to 0
+   repeat with i from 1 to total
+    try
+     if persistent ID of track i of pl is equal to cid then
+      set idx to i
+      exit repeat
+     end if
+    end try
+   end repeat
+   if idx is not 0 and total > 1 then
+    repeat with offset from 1 to 12
+     set j to ((idx + offset - 1) mod total) + 1
+     set t to track j of pl
+     set tid to persistent ID of t
+     if tid is not in seen then
+      set end of seen to tid
+      set end of rows to tid
+      set end of rows to name of t
+      try
+       set end of rows to artist of t
+      on error
+       set end of rows to ""
+      end try
+     end if
+     if (count of seen) ≥ 12 then exit repeat
+    end repeat
+   end if
+  end try
+ end if
+ set need to 6 - (count of seen)
+ if need > 0 then
+  try
+   set lib to library playlist 1
+   set libCount to count of tracks of lib
+   if libCount > 0 then
+    repeat with n from 1 to (need * 4)
+     set t to some track of lib
+     set tid to persistent ID of t
+     if tid is not in seen then
+      set end of seen to tid
+      set end of rows to tid
+      set end of rows to name of t
+      try
+       set end of rows to artist of t
+      on error
+       set end of rows to ""
+      end try
+      set need to need - 1
+      if need ≤ 0 then exit repeat
+     end if
+    end repeat
+   end if
+  end try
+ end if
  return rows
  end tell
  """
@@ -219,8 +308,9 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
   neighbors.previousTrackID = descriptor.atIndex(3)?.stringValue
   if let data = descriptor.atIndex(4)?.data, NSImage(data: data) != nil { neighbors.previousArtwork = data }
   if neighbors.nextTrackID != nil || neighbors.previousTrackID != nil { reply.neighbors = neighbors }
- } else if operation == "playlistTracks", let descriptor, descriptor.numberOfItems >= 1 {
-  let name = descriptor.atIndex(1)?.stringValue ?? "Playlist"
+ } else if operation == "playlistTracks" || operation == "upcomingTracks",
+           let descriptor, descriptor.numberOfItems >= 1 {
+  let name = descriptor.atIndex(1)?.stringValue ?? (operation == "upcomingTracks" ? "Próximas" : "Playlist")
   var tracks:[MusicCassetteTrack] = []
   var index = 2
   while index + 2 <= descriptor.numberOfItems {
