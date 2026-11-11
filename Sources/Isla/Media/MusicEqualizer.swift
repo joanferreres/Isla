@@ -264,8 +264,11 @@ actor MusicEqualizer {
             throw Failure.preset
         }
         try await Task.sleep(for: .milliseconds(120))
-        guard let item = findMenuItem(named: name, under: popup)
-                ?? findMenuItem(named: name, under: try musicApplication()) else {
+        var item = findMenuItem(named: name, under: popup)
+        if item == nil {
+            item = findMenuItem(named: name, under: try musicApplication())
+        }
+        guard let item else {
             _ = AXUIElementPerformAction(popup, kAXCancelAction as CFString)
             throw Failure.preset
         }
