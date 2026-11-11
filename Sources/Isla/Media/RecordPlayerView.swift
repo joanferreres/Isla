@@ -45,6 +45,7 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     @StateObject private var speakerBattery = BluetoothSpeakerBattery()
     @State private var artwork: NSImage?
     @State private var showsAmbiences = false
+    @State private var showsCassette = false
     @State private var pendingCue: PendingCue?
     @State private var swapOffset: CGFloat = 0
     @State private var swapCommit: RecordSwipe?
@@ -83,14 +84,17 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
             let snapshot = music.state.snapshot
             let ticking = presentation.isVisible && music.enabled && snapshot?.playing == true
             let spinning = ticking && !reduceMotion
-            ZStack {
+            ZStack(alignment: .trailing) {
                 HStack(spacing: diameter * 0.14 + 14) {
                     turntable(diameter: diameter, snapshot: snapshot, ticking: ticking, spinning: spinning)
                     RecordPlayerMixer(music: music, palette: palette,
                                       active: presentation.isVisible && music.enabled)
                         .frame(width: 220)
+                        .opacity(showsCassette ? 0.22 : 1)
+                        .allowsHitTesting(!showsCassette)
                 }
                 .padding(.leading, diameter * 0.11)
+                .padding(.trailing, showsCassette ? 300 : 0)
                 VStack {
                     trackHeading(snapshot)
                     Spacer(minLength: 0)
@@ -98,8 +102,35 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                 }
                 .padding(.horizontal, 24)
                 .padding(.vertical, 14)
+                .padding(.trailing, showsCassette ? 300 : 0)
+                if showsCassette {
+                    RecordCassettePanel(
+                        palette: palette,
+                        reduceMotion: reduceMotion,
+                        currentTitle: snapshot?.title,
+                        currentArtist: snapshot?.artist,
+                        onClose: {
+                            withAnimation(reduceMotion ? nil : .snappy(duration: 0.32)) {
+                                showsCassette = false
+                            }
+                        },
+                        onPlay: { track in
+                            do {
+                                try await music.playPlaylistTrack(track.id)
+                                return nil
+                            } catch {
+                                return error.localizedDescription
+                            }
+                        }
+                    )
+                    .padding(.trailing, 18)
+                    .padding(.vertical, 28)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .zIndex(20)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(reduceMotion ? nil : .snappy(duration: 0.34), value: showsCassette)
         }
         .foregroundStyle(ink)
         .background(Color(nsColor: palette.background).ignoresSafeArea())
@@ -391,6 +422,17 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                     .accessibilityValue("\(battery.percent) por ciento")
                     .help(battery.name)
             }
+            if music.enabled {
+                playerButton(tint: showsCassette ? accent : nil) {
+                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.34)) {
+                        showsCassette.toggle()
+                    }
+                } label: {
+                    Image(systemName: "cassette.fill")
+                }
+                .accessibilityLabel(showsCassette ? "Cerrar cinta" : "Abrir canciones de la cinta")
+                .help("Despliega la playlist actual como una cinta de casete")
+            }
             if let snapshot, music.enabled {
                 RecordPlaylistPicker(track: snapshot).id(snapshot.trackID)
             }
@@ -432,7 +474,10 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
             .onChange(of: palette) { _, _ in showsAmbiences = false }
         }
         .onChange(of: presentation.isVisible) { _, visible in
-            if !visible { showsAmbiences = false }
+            if !visible {
+                showsAmbiences = false
+                showsCassette = false
+            }
         }
     }
 

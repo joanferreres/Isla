@@ -13,6 +13,24 @@ actor MusicPlaylistService {
         }
     }
 
+    func currentCatalog() async throws -> MusicPlaylistCatalog {
+        guard let catalog = try await bridge.query("playlistTracks").playlistCatalog else {
+            throw MusicFailure(message: "Música no expone una playlist con canciones ahora mismo.")
+        }
+        return catalog
+    }
+
+    func play(trackID: String) async throws {
+        let reply = try await bridge.query("playTrack", argument: trackID)
+        guard reply.artworkTrackID == trackID else {
+            throw MusicFailure(message: "Esa canción ya no está en la playlist de Música.")
+        }
+    }
+
+    func artwork(trackID: String) async throws -> Data? {
+        try await bridge.query("trackArtwork", argument: trackID).artwork(for: trackID)
+    }
+
     /// Returns false when the song was already in the selected playlist.
     func add(_ track: MediaSnapshot, to playlist: MusicPlaylist, unambiguousName: Bool) async throws -> Bool {
         let request = MusicPlaylistRequest(playlistID: playlist.id, track: track)

@@ -241,6 +241,16 @@ import IslandCore
         return try await reader.volume(value)
     }
 
+    func playPlaylistTrack(_ trackID: String) async throws {
+        guard enabled, !permissionDenied else {
+            throw MusicFailure(message: "Conecta Apple Music para usar la cinta.")
+        }
+        let playlists = MusicPlaylistService()
+        try await playlists.play(trackID: trackID)
+        pendingNavigation = nil
+        await refresh()
+    }
+
     func send(_ command: MediaCommand, trackID: String? = nil) {
         guard !permissionDenied else { return }
         switch command {
