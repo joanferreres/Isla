@@ -46,7 +46,8 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     @State private var artwork: NSImage?
     @State private var showsAmbiences = false
     @State private var changerEpoch = 0
-    @State private var shuffling = false
+    @State private var shuffleOn = false
+    @State private var shuffleBusy = false
     @State private var pendingCue: PendingCue?
     @State private var swapOffset: CGFloat = 0
     @State private var swapCommit: RecordSwipe?
@@ -438,6 +439,8 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
             if music.enabled {
                 shuffleButton
                 RecordQueuePlaylistButton {
+                    // playPlaylist turns Music shuffle off — mirror that in the toggle.
+                    shuffleOn = false
                     changerEpoch += 1
                 }
             }
@@ -491,21 +494,21 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
 
     @ViewBuilder private var shuffleButton: some View {
         let button = Button {
-            guard !shuffling else { return }
-            shuffling = true
+            guard !shuffleBusy else { return }
+            shuffleBusy = true
+            let target = !shuffleOn
             Task {
-                defer { shuffling = false }
+                defer { shuffleBusy = false }
                 do {
-                    try await MusicPlaylistService().playShuffle()
+                    shuffleOn = try await MusicPlaylistService().setShuffle(target)
                     music.error = nil
-                    changerEpoch += 1
                 } catch {
                     music.error = error.localizedDescription
                 }
             }
         } label: {
             Group {
-                if shuffling {
+                if shuffleBusy {
                     ProgressView().controlSize(.small)
                 } else {
                     Image(systemName: "shuffle")
@@ -514,11 +517,26 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
             .frame(minWidth: 24, minHeight: 32)
         }
         .buttonBorderShape(.capsule)
-        .disabled(shuffling)
-        .accessibilityLabel("Reproducir aleatorio")
-        .help("Activa el shuffle de Música y pone a sonar una canción al azar")
+        .disabled(shuffleBusy)
+        .accessibilityLabel(shuffleOn ? "Desactivar aleatorio" : "Activar aleatorio")
+        .accessibilityValue(shuffleOn ? "Activado" : "Desactivado")
+        .help(shuffleOn
+              ? "Aleatorio activado — pulsa para desactivar. Elegir una playlist lo apaga."
+              : "Aleatorio desactivado — pulsa para activar el shuffle de Música")
+        .task(id: presentation.isVisible) {
+            guard presentation.isVisible, music.enabled else { return }
+            if let enabled = try? await MusicPlaylistService().shuffleEnabled() {
+                shuffleOn = enabled
+            }
+        }
         if #available(macOS 26.0, *), !reduceTransparency {
-            button.buttonStyle(.glass)
+            if shuffleOn {
+                button.buttonStyle(.glassProminent).tint(accent)
+            } else {
+                button.buttonStyle(.glass)
+            }
+        } else if shuffleOn {
+            button.buttonStyle(.borderedProminent).tint(accent)
         } else {
             button.buttonStyle(.bordered)
         }

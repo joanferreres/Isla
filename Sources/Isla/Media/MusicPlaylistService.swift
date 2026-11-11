@@ -42,9 +42,14 @@ actor MusicPlaylistService {
         _ = try await bridge.query("playPlaylist", argument: playlist.id)
     }
 
-    /// Enable Music shuffle and start a random song (current playlist if any, else library).
-    func playShuffle() async throws {
-        _ = try await bridge.query("playShuffle")
+    func shuffleEnabled() async throws -> Bool {
+        try await bridge.query("shuffleState").shuffleEnabled ?? false
+    }
+
+    /// Toggle Music’s shuffle mode only — does not restart or randomize the current queue.
+    @discardableResult
+    func setShuffle(_ enabled: Bool) async throws -> Bool {
+        try await bridge.query("setShuffle", argument: enabled ? "1" : "0").shuffleEnabled ?? enabled
     }
 
     func play(trackID: String) async throws {

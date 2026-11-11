@@ -17,38 +17,44 @@ struct MusicPlaylistRequest: Codable, Sendable {
 
 @MainActor enum MusicPlaylistScripts {
     static func run(_ operation: String, argument: String?) -> MusicReply? {
-        guard ["playlists", "playlistContainsTrack", "playlistAddTrack", "playPlaylist", "playShuffle"].contains(operation) else { return nil }
+        guard ["playlists", "playlistContainsTrack", "playlistAddTrack", "playPlaylist",
+               "shuffleState", "setShuffle"].contains(operation) else { return nil }
         guard !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Music").isEmpty else {
             return MusicReply(error: "Abre Música para ver tus playlists.")
         }
         do {
-            if operation == "playShuffle" {
-                _ = try execute("""
+            if operation == "shuffleState" {
+                let rows = try execute("""
                 tell application "Music"
-                    set shuffle enabled to true
-                    set shuffle mode to songs
-                    try
-                        set pl to current playlist
-                        play pl
-                    on error
-                        set t to some track of library playlist 1
-                        play t
-                    end try
+                    return shuffle enabled
                 end tell
                 """)
-                return MusicReply()
+                return MusicReply(shuffleEnabled: rows.booleanValue)
+            }
+            if operation == "setShuffle" {
+                let enabled = argument == "1" || argument?.lowercased() == "true"
+                let rows = try execute("""
+                tell application "Music"
+                    set shuffle enabled to \(enabled ? "true" : "false")
+                    if \(enabled ? "true" : "false") then set shuffle mode to songs
+                    return shuffle enabled
+                end tell
+                """)
+                return MusicReply(shuffleEnabled: rows.booleanValue)
             }
             if operation == "playPlaylist" {
                 guard let argument, validID(argument) else {
                     throw MusicFailure(message: "No se pudo identificar la playlist.")
                 }
+                // Always play the playlist in order — never leave shuffle on from a prior toggle.
                 _ = try execute("""
                 tell application "Music"
+                    set shuffle enabled to false
                     set destination to get first user playlist whose persistent ID is "\(argument)"
                     play destination
                 end tell
                 """)
-                return MusicReply()
+                return MusicReply(shuffleEnabled: false)
             }
             if operation == "playlists" {
                 let rows = try execute("""

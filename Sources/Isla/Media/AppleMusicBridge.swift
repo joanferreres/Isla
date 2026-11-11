@@ -19,6 +19,7 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
  var playlists:[MusicPlaylist]?;var playlistContainsTrack:Bool?
  var neighbors:MusicNeighbors?
  var playlistCatalog:MusicPlaylistCatalog?
+ var shuffleEnabled:Bool?
  func artwork(for trackID:String) -> Data? { artworkTrackID == trackID ? artwork : nil }
 }
 @MainActor enum MusicHelper {
