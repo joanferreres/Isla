@@ -314,7 +314,8 @@ private struct ChangerTrackpadWheel: NSViewRepresentable {
     }
 }
 
-/// Disc tip that hangs mostly outside the black player field — press to open the changer.
+/// Disc tip that hangs half outside the black player field — press to open the changer.
+/// The protruding (leading) half is blank vinyl; cover art stays on the inner half only.
 struct RecordDiscChangerPeek: View {
     let palette: RecordPlayerPalette
     let artwork: NSImage?
@@ -324,18 +325,38 @@ struct RecordDiscChangerPeek: View {
     var body: some View {
         Button(action: action) {
             ZStack {
+                // Full blank vinyl — this is what sticks outside the screen.
                 Circle()
-                    .fill(palette.vinyl)
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                Color(white: 0.22),
+                                palette.vinyl,
+                                Color(white: 0.05)
+                            ],
+                            center: .center,
+                            startRadius: 2,
+                            endRadius: diameter * 0.52
+                        )
+                    )
+                // Subtle groove rings on the outer vinyl half.
+                ForEach(0..<4, id: \.self) { index in
+                    Circle()
+                        .strokeBorder(Color.white.opacity(0.04 + Double(index) * 0.01), lineWidth: 0.6)
+                        .frame(width: diameter * (0.55 + CGFloat(index) * 0.1),
+                               height: diameter * (0.55 + CGFloat(index) * 0.1))
+                }
+                // Cover art only on the trailing (inner) semicircle.
                 if let artwork {
                     Image(nsImage: artwork)
                         .resizable()
                         .scaledToFill()
-                        .frame(width: diameter * 0.5, height: diameter * 0.5)
+                        .frame(width: diameter, height: diameter)
                         .clipShape(Circle())
-                } else {
-                    Circle()
-                        .fill(palette.accent.opacity(0.75))
-                        .frame(width: diameter * 0.5, height: diameter * 0.5)
+                        .mask(alignment: .trailing) {
+                            Rectangle()
+                                .frame(width: diameter * 0.5, height: diameter)
+                        }
                 }
                 Circle().fill(.black).frame(width: max(5, diameter * 0.08), height: max(5, diameter * 0.08))
             }

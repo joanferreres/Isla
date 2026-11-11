@@ -88,9 +88,9 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
 
     var body: some View {
         GeometryReader { proxy in
-            // ~2/3 of the peek hangs outside the black field over the clear window strip.
+            // Half the peek hangs outside the black field over the clear window strip.
             let peekDiameter: CGFloat = 90
-            let peekOutside = peekDiameter * (2.0 / 3.0)
+            let peekOutside = peekDiameter * 0.5
             let changerWidth: CGFloat = 328
             let leadingReserve = showsChanger ? changerWidth : (music.enabled ? peekOutside : 0)
             let diameter = max(120, min(660,
@@ -127,7 +127,7 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                 .background(Color(nsColor: palette.background))
 
                 if music.enabled, !showsChanger, changerHandOff == nil {
-                    // Disc spans [0, peekDiameter]; black field starts at peekOutside → only ~1/3 inside.
+                    // Disc spans [0, peekDiameter]; black field starts at mid-disc → half outside.
                     RecordDiscChangerPeek(
                         palette: palette,
                         artwork: artwork,
