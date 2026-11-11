@@ -17,10 +17,16 @@ struct RecordPlayerMixer: View {
     @State private var confirmedVolume: Int?
     @State private var volumeRequest: Int?
     @State private var volumeError: String?
+    @State private var presets: [String] = []
+    @State private var selectedPreset: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            resetButton
+            HStack(spacing: 8) {
+                presetMenu
+                Spacer(minLength: 0)
+                resetButton
+            }
             HStack(spacing: 15) {
                 VStack(spacing: 7) {
                     ForEach(MixerBand.allCases, id: \.self) { band in
@@ -52,9 +58,13 @@ struct RecordPlayerMixer: View {
         .task(id: active) {
             guard active else { return }
             await readVolume()
+            await loadPresets()
             if let current = try? await equalizer.read(), !Task.isCancelled, !changingEQ {
                 gains = current
                 eqFailure = nil
+            }
+            if let name = try? await equalizer.currentPresetName(), !Task.isCancelled {
+                selectedPreset = name
             }
         }
         .task(id: volumeRequest) {
@@ -77,10 +87,44 @@ struct RecordPlayerMixer: View {
         }
     }
 
+    @ViewBuilder private var presetMenu: some View {
+        let label = selectedPreset ?? "Preset EQ"
+        let menu = Menu {
+            if presets.isEmpty {
+                Text("Sin presets").foregroundStyle(.secondary)
+            } else {
+                ForEach(presets, id: \.self) { name in
+                    Button(name) { applyPreset(name) }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "slider.horizontal.3")
+                Text(label)
+                    .lineLimit(1)
+            }
+            .font(.caption.weight(.medium))
+            .frame(maxWidth: 132, alignment: .leading)
+        }
+        .controlSize(.small)
+        .disabled(!active || changingEQ || presets.isEmpty)
+        .accessibilityLabel("Preset del ecualizador de Música")
+        .help("Aplica un preset de fábrica del ecualizador de Música. El EQ sigue activo si cierras el panel de Isla.")
+        if #available(macOS 26.0, *), !reduceTransparency {
+            menu.menuStyle(.borderlessButton)
+        } else {
+            menu
+        }
+    }
+
     @ViewBuilder private var resetButton: some View {
         let button = Button {
             let neutral = Dictionary(uniqueKeysWithValues: MixerBand.allCases.map { ($0, 0.0) })
-            applyEQ(preview: neutral) { try await equalizer.reset() }
+            applyEQ(preview: neutral) {
+                let result = try await equalizer.reset()
+                selectedPreset = try? await equalizer.currentPresetName()
+                return result
+            }
         } label: {
             Image(systemName: "arrow.counterclockwise")
                 .font(.caption.weight(.medium))
@@ -89,9 +133,8 @@ struct RecordPlayerMixer: View {
         .controlSize(.small)
         .buttonBorderShape(.capsule)
         .accessibilityLabel("Restablecer ecualizador")
-        .help("Poner graves, medios y agudos a cero")
+        .help("Poner graves, medios y agudos a cero y desactivar el EQ de Música")
         .disabled(!active || changingEQ)
-        .padding(.leading, 9)
         if #available(macOS 26.0, *), !reduceTransparency {
             button.buttonStyle(.glass)
         } else {
@@ -179,12 +222,43 @@ struct RecordPlayerMixer: View {
     private func adjust(_ target: Double, band: MixerBand) {
         var preview = gains
         preview[band] = min(12, max(-12, target))
-        applyEQ(preview: preview) { try await equalizer.set(preview[band] ?? 0, for: band) }
+        applyEQ(preview: preview) {
+            let result = try await equalizer.set(preview[band] ?? 0, for: band)
+            // Manual band edits leave Music on a custom curve.
+            selectedPreset = try? await equalizer.currentPresetName() ?? "Manual"
+            return result
+        }
+    }
+
+    private func applyPreset(_ name: String) {
+        applyEQ(preview: gains) {
+            let result = try await equalizer.selectPreset(name)
+            selectedPreset = name
+            return result
+        }
+    }
+
+    private func loadPresets() async {
+        do {
+            let names = try await equalizer.presetNames()
+            guard !Task.isCancelled else { return }
+            presets = names
+        } catch {
+            if !Task.isCancelled {
+                let failure = (error as? MusicEqualizer.Failure) ?? .unresponsive
+                eqFailure = failure
+                if failure == .access, !offeredAccess {
+                    offeredAccess = true
+                    showAccess = true
+                }
+            }
+        }
     }
 
     private func applyEQ(preview: [MixerBand: Double], operation: @escaping () async throws -> [MixerBand: Double]) {
         guard active else { return }
         let confirmed = gains
+        let confirmedPreset = selectedPreset
         gains = preview
         eqRevision += 1
         let revision = eqRevision
@@ -199,6 +273,7 @@ struct RecordPlayerMixer: View {
             } catch {
                 if revision == eqRevision {
                     gains = confirmed
+                    selectedPreset = confirmedPreset
                     let failure = (error as? MusicEqualizer.Failure) ?? .unresponsive
                     eqFailure = failure
                     if failure == .access, !offeredAccess {
