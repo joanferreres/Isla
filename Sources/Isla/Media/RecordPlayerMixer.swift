@@ -10,6 +10,7 @@ struct RecordPlayerMixer: View {
     @State private var gains: [MixerBand: Double] = [:]
     @State private var eqFailure: MusicEqualizer.Failure?
     @State private var changingEQ = false
+    @State private var eqRevision = 0
     @State private var showAccess = false
     @State private var offeredAccess = false
     @State private var volume: Int?
@@ -26,7 +27,7 @@ struct RecordPlayerMixer: View {
                         EQKnob(title: band.title, gain: gains[band], accent: palette.accent) { value in
                             adjust(value, band: band)
                         }
-                        .disabled(!active || changingEQ)
+                        .disabled(!active)
                     }
                 }
                 volumeFader
@@ -175,34 +176,38 @@ struct RecordPlayerMixer: View {
         volumeRequest = target
     }
 
-    private func adjust(_ adjustment: MusicEqualizer.Adjustment, band: MixerBand) {
+    private func adjust(_ target: Double, band: MixerBand) {
         var preview = gains
-        switch adjustment {
-        case .relative(let delta): preview[band] = min(12, max(-12, (gains[band] ?? 0) + delta))
-        case .reset: preview[band] = 0
-        }
-        applyEQ(preview: preview) { try await equalizer.adjust(adjustment, for: band) }
+        preview[band] = min(12, max(-12, target))
+        applyEQ(preview: preview) { try await equalizer.set(preview[band] ?? 0, for: band) }
     }
 
     private func applyEQ(preview: [MixerBand: Double], operation: @escaping () async throws -> [MixerBand: Double]) {
-        guard active, !changingEQ else { return }
+        guard active else { return }
         let confirmed = gains
         gains = preview
+        eqRevision += 1
+        let revision = eqRevision
         changingEQ = true
         Task {
-            defer { changingEQ = false }
             do {
-                gains = try await operation()
-                eqFailure = nil
+                let result = try await operation()
+                if revision == eqRevision {
+                    gains = result
+                    eqFailure = nil
+                }
             } catch {
-                gains = confirmed
-                let failure = (error as? MusicEqualizer.Failure) ?? .unresponsive
-                eqFailure = failure
-                if failure == .access, !offeredAccess {
-                    offeredAccess = true
-                    showAccess = true
+                if revision == eqRevision {
+                    gains = confirmed
+                    let failure = (error as? MusicEqualizer.Failure) ?? .unresponsive
+                    eqFailure = failure
+                    if failure == .access, !offeredAccess {
+                        offeredAccess = true
+                        showAccess = true
+                    }
                 }
             }
+            if revision == eqRevision { changingEQ = false }
         }
     }
 }
@@ -211,7 +216,7 @@ private struct EQKnob: View {
     let title: String
     let gain: Double?
     let accent: Color
-    let apply: (MusicEqualizer.Adjustment) -> Void
+    let apply: (Double) -> Void
 
     @GestureState private var adjustment: Double?
     @FocusState private var focused: Bool
@@ -245,17 +250,17 @@ private struct EQKnob: View {
                     preview = min(12, max(-12, (gain ?? 0) + delta(drag.translation)))
                 }
                 .onEnded { drag in
-                    let change = delta(drag.translation).rounded()
-                    if change != 0 { apply(.relative(change)) }
+                    let target = min(12, max(-12, (gain ?? 0) + delta(drag.translation))).rounded()
+                    if target != gain { apply(target) }
                 })
-            .onTapGesture(count: 2) { apply(.reset) }
+            .onTapGesture(count: 2) { apply(0) }
             .focusable()
             .focusEffectDisabled()
             .focused($focused)
             .onMoveCommand { direction in
                 switch direction {
-                case .up, .right: apply(.relative(1))
-                case .down, .left: apply(.relative(-1))
+                case .up, .right: apply(min(12, (gain ?? 0) + 1))
+                case .down, .left: apply(max(-12, (gain ?? 0) - 1))
                 @unknown default: break
                 }
             }
@@ -267,8 +272,8 @@ private struct EQKnob: View {
         .accessibilityValue(displayedGain.map { "\(Int($0)) decibelios" } ?? "No disponible")
         .accessibilityAdjustableAction { direction in
             switch direction {
-            case .increment: apply(.relative(1))
-            case .decrement: apply(.relative(-1))
+            case .increment: apply(min(12, (gain ?? 0) + 1))
+            case .decrement: apply(max(-12, (gain ?? 0) - 1))
             @unknown default: break
             }
         }

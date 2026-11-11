@@ -164,7 +164,12 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  menu.popUp(positioning:nil,at:anchor,in:nil)
  }
  }
- func show() { model.pointerInside=false;refreshGeometry();panel.orderFrontRegardless();updatePointer() }
+ func show() {
+ model.pointerInside=false;refreshGeometry();panel.orderFrontRegardless();updatePointer()
+ // App activation can finish ordering its windows after the workspace notification.
+ // Reassert the island once on the next main-loop turn without changing its level.
+ DispatchQueue.main.async { [weak panel] in panel?.orderFrontRegardless() }
+ }
  func stop() { pendingResize?.cancel();model.finishFileDrop();panel.unregisterDraggedTypes();monitors.forEach { NSEvent.removeMonitor($0) }; monitors=[]; subscriptions=[]; panel.close() }
  func refreshGeometry() {
  guard let screen=NSScreen.screens.first(where:{ ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == displayID }) else { return }

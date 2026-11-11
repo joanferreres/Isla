@@ -53,7 +53,9 @@ struct RecordSwipeGesture: ViewModifier {
     }
 
     private func preview(_ distance: CGSize) -> CGFloat {
-        guard !reduceMotion, abs(distance.width) > abs(distance.height) else { return 0 }
+        // Direct manipulation follows the fingers even with Reduce Motion enabled;
+        // only the automatic recoil animation is suppressed in that mode.
+        guard abs(distance.width) > abs(distance.height) else { return 0 }
         let limit = diameter * 0.12
         return max(-limit, min(limit, distance.width * 0.55))
     }

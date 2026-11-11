@@ -50,7 +50,7 @@ Requiere un sensor compatible y el permiso de Grabación de pantalla. Algunos mo
 
 ## Validación pendiente
 
-La versión 0.8.41 pasa 128 pruebas automatizadas y su ZIP tiene firma válida al extraerlo en el Mac de desarrollo. Sigue pendiente confirmar el recorrido de los clics físicos y los sensores en más equipos. No se presenta la distribución por GitHub como una solución comprobada para todos los Macs compatibles.
+La versión 0.8.42 incluye 128 pruebas automatizadas y su ZIP se valida después de extraerlo en el Mac de desarrollo. Sigue pendiente confirmar el recorrido de los clics físicos y los sensores en más equipos. No se presenta la distribución por GitHub como una solución comprobada para todos los Macs compatibles.
 
 ## No aparece el aviso de actualización
 

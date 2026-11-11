@@ -5,6 +5,7 @@ import QuickLookThumbnailing
  @ObservedObject var store:LocalStore
  @ObservedObject var model:IslandModel
  @ObservedObject var airDrop:AirDropService
+ @State private var nativeDropActive=false
  var body:some View {
  let targeted=model.fileDropTarget == .shelf
  let airDropTargeted=model.fileDropTarget == .airDrop
@@ -38,6 +39,16 @@ import QuickLookThumbnailing
  Button("Añadir archivos…") { ShelfService.chooseFiles(into:store,onBegin:model.beginInteraction,onEnd:model.endInteraction) }
  Button("Vaciar bandeja",action:store.clearFiles).disabled(store.document.files.isEmpty)
  } label: { Image(systemName:"ellipsis").font(.system(size:12,weight:.bold)).padding(8) }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("Opciones de la bandeja") };Spacer() }
+ }
+ .dropDestination(for: URL.self) { urls, _ in
+ let files=urls.filter { $0.isFileURL && FileManager.default.fileExists(atPath:$0.path) }
+ guard !files.isEmpty else { return false }
+ store.addFiles(files)
+ return true
+ } isTargeted: { active in
+ guard nativeDropActive != active else { return }
+ nativeDropActive=active
+ if active { model.beginInteraction() } else { model.endInteraction() }
  }
  .background(targeted ? Color.mint.opacity(0.05) : .clear,in:RoundedRectangle(cornerRadius:18))
  VStack(spacing:7) {

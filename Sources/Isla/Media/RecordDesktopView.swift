@@ -28,7 +28,7 @@ struct RecordDesktopView: View {
                 control("Abrir tocadiscos completo", symbol: "arrow.up.left.and.arrow.down.right", action: openPlayer)
                 control("Ocultar del escritorio", symbol: "xmark", action: close)
             }
-            TimelineView(.animation(minimumInterval: 1.0 / 15, paused: !spinning)) { context in
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !spinning)) { context in
                 let phase = spinning ? music.displayPosition(at: context.date).truncatingRemainder(dividingBy: 3.6) * 100 : 0
                 VinylRecord(artwork: artwork, palette: palette, rotation: phase)
                     .frame(width: 91, height: 91)

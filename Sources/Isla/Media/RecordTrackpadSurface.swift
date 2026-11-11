@@ -46,9 +46,9 @@ struct RecordTrackpadSurface: NSViewRepresentable {
         }
 
         private func handle(_ event: NSEvent) {
-            guard let window, event.window === window, window.isKeyWindow,
+            guard let window, event.window === window,
                   event.hasPreciseScrollingDeltas, event.momentumPhase.isEmpty else { return }
-            if event.phase.contains(.began) {
+            if event.phase.contains(.began) || event.phase.contains(.mayBegin) || distance == nil {
                 let point = convert(event.locationInWindow, from: nil)
                 let inside = hypot(point.x - bounds.midX, point.y - bounds.midY) <= bounds.width / 2
                 distance = inside ? .zero : nil

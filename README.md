@@ -122,7 +122,7 @@ Las versiones 0.8.7 o anteriores necesitan una actualización manual inicial. Un
 
 ## Versión actual
 
-**Isla 0.8.41**, compilación 71.
+**Isla 0.8.42**, compilación 72.
 
 El proyecto cuenta con 128 pruebas automatizadas. La compatibilidad física del notch, los sensores y algunos permisos todavía puede variar entre modelos y versiones de macOS.
 

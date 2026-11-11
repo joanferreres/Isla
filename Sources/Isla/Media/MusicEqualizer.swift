@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
 
-enum MixerBand: String, CaseIterable {
+enum MixerBand: String, CaseIterable, Sendable {
     case bass, mid, treble
 
     var title: String {
@@ -13,7 +13,6 @@ enum MixerBand: String, CaseIterable {
         }
     }
 
-    // Música orders the sliders from preamp and 32 Hz through 16 kHz.
     var sliderIndices: Range<Int> {
         switch self {
         case .bass: 1..<5
@@ -27,7 +26,6 @@ struct MusicEqualizerScale {
     let unitsPerDecibel: Double
 
     init(maximum: Double?) {
-        // Music's current sliders expose ±1200 AX units for ±12 dB.
         unitsPerDecibel = maximum == 12 ? 1 : 100
     }
 
@@ -51,10 +49,6 @@ actor MusicEqualizer {
         }
     }
 
-    enum Adjustment: Sendable {
-        case relative(Double), reset
-    }
-
     enum Failure: LocalizedError {
         case access, closed, unresponsive
 
@@ -72,49 +66,10 @@ actor MusicEqualizer {
         return controls.gains(for: controls.values)
     }
 
-    private func openFromMenu() throws -> Bool {
-        let app = try musicApplication()
-        guard let menuBar = attribute(app, kAXMenuBarAttribute),
-              CFGetTypeID(menuBar) == AXUIElementGetTypeID() else { return false }
-        for heading in elements(unsafeDowncast(menuBar, to: AXUIElement.self), kAXChildrenAttribute) {
-            for menu in elements(heading, kAXChildrenAttribute) {
-                if let item = elements(menu, kAXChildrenAttribute).first(where: {
-                    let title = (attribute($0, kAXTitleAttribute) as? String)?.lowercased()
-                    return ["equalizer", "equaliser", "ecualizador", "equalitzador"].contains(title ?? "")
-                        || (attribute($0, kAXMenuItemCmdCharAttribute) as? String)?.lowercased() == "e"
-                        && number($0, kAXMenuItemCmdModifiersAttribute) == 2
-                }), AXUIElementPerformAction(item, kAXPressAction as CFString) == .success { return true }
-            }
-        }
-        return false
-    }
-
-    private func openWithShortcut() throws {
-        let app = try musicApplication()
-        var pid: pid_t = 0
-        guard AXUIElementGetPid(app, &pid) == .success, pid > 0,
-              let down = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_E), keyDown: true),
-              let up = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_E), keyDown: false) else {
-            throw Failure.closed
-        }
-        for event in [down, up] {
-            event.flags = [.maskCommand, .maskAlternate]
-            event.postToPid(pid)
-        }
-    }
-
-    func adjust(_ adjustment: Adjustment, for band: MixerBand) async throws -> [MixerBand: Double] {
+    func set(_ gain: Double, for band: MixerBand) async throws -> [MixerBand: Double] {
+        guard gain.isFinite else { throw Failure.unresponsive }
         let controls = try await openControlsIfNeeded()
-        let gain: Double
-        switch adjustment {
-        case .relative(let delta):
-            guard delta.isFinite, let baseline = controls.gains(for: controls.values)[band] else {
-                throw Failure.unresponsive
-            }
-            gain = min(12, max(-12, baseline + delta))
-        case .reset: gain = 0
-        }
-        return try apply(gain, to: band.sliderIndices, enabled: true, controls: controls)
+        return try apply(min(12, max(-12, gain)), to: band.sliderIndices, enabled: true, controls: controls)
     }
 
     func reset() async throws -> [MixerBand: Double] {
@@ -128,15 +83,15 @@ actor MusicEqualizer {
         let changed = indices.filter { controls.values[$0] != nativeGain }
         var values = controls.values
         do {
+            // Enabling first preserves Music's selected curve. Cycling the switch
+            // after a write can reload the preset and undo the user's adjustment.
+            try setEnabled(enabled, on: controls.toggle)
             for index in changed {
                 let slider = controls.sliders[index]
                 guard AXUIElementSetAttributeValue(slider, kAXValueAttribute as CFString, NSNumber(value: nativeGain)) == .success else {
                     throw Failure.unresponsive
                 }
             }
-            // Reload the curve through Music's own switch after changing native slider values.
-            if !changed.isEmpty { try setEnabled(false, on: controls.toggle) }
-            try setEnabled(enabled, on: controls.toggle)
             for index in changed {
                 guard let actual = number(controls.sliders[index], kAXValueAttribute),
                       abs(controls.scale.decibels(actual) - gain) < 0.1 else { throw Failure.unresponsive }
@@ -172,6 +127,37 @@ actor MusicEqualizer {
         }
     }
 
+    private func openFromMenu() throws -> Bool {
+        let app = try musicApplication()
+        guard let menuBar = attribute(app, kAXMenuBarAttribute),
+              CFGetTypeID(menuBar) == AXUIElementGetTypeID() else { return false }
+        for heading in elements(unsafeDowncast(menuBar, to: AXUIElement.self), kAXChildrenAttribute) {
+            for menu in elements(heading, kAXChildrenAttribute) {
+                if let item = elements(menu, kAXChildrenAttribute).first(where: {
+                    let title = (attribute($0, kAXTitleAttribute) as? String)?.lowercased()
+                    return ["equalizer", "equaliser", "ecualizador", "equalitzador"].contains(title ?? "")
+                        || (attribute($0, kAXMenuItemCmdCharAttribute) as? String)?.lowercased() == "e"
+                        && number($0, kAXMenuItemCmdModifiersAttribute) == 2
+                }), AXUIElementPerformAction(item, kAXPressAction as CFString) == .success { return true }
+            }
+        }
+        return false
+    }
+
+    private func openWithShortcut() throws {
+        let app = try musicApplication()
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(app, &pid) == .success, pid > 0,
+              let down = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_E), keyDown: true),
+              let up = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_E), keyDown: false) else {
+            throw Failure.closed
+        }
+        for event in [down, up] {
+            event.flags = [.maskCommand, .maskAlternate]
+            event.postToPid(pid)
+        }
+    }
+
     private func waitForControls(attempts: Int) async throws -> Controls? {
         for _ in 0..<attempts {
             try await Task.sleep(for: .milliseconds(120))
@@ -183,11 +169,9 @@ actor MusicEqualizer {
 
     private func findControls() throws -> Controls {
         let app = try musicApplication()
-        let windows = elements(app, kAXWindowsAttribute)
-        for window in windows {
+        for window in elements(app, kAXWindowsAttribute) {
             let children = elements(window, kAXChildrenAttribute)
             let sliders = children.filter { role($0) == kAXSliderRole }
-            // The equalizer has a preset selector, an on/off control and 11 gain sliders.
             guard sliders.count == 11,
                   children.contains(where: { role($0) == kAXPopUpButtonRole }),
                   let toggle = children.first(where: { role($0) == kAXCheckBoxRole }) else { continue }

@@ -117,25 +117,28 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
 
     private func turntable(diameter: CGFloat, snapshot: MediaSnapshot?, ticking: Bool, spinning: Bool) -> some View {
         let width = diameter * RecordCue.armWidth
-        return TimelineView(.animation(minimumInterval: spinning ? 1.0 / 20 : 1, paused: !ticking)) { context in
+        return TimelineView(.animation(minimumInterval: spinning ? 1.0 / 60 : 1, paused: !spinning)) { context in
             let elapsed = playbackSeconds(snapshot, at: context.date)
             let duration = snapshot?.duration ?? 0
             let progress = duration > 0 ? min(1, elapsed / duration) : 0
             let phase = elapsed.truncatingRemainder(dividingBy: 3.6) * 100
             let playing = snapshot?.playing == true
-            VinylRecord(artwork: artwork, palette: palette, rotation: reduceMotion ? 0 : phase)
+            ZStack {
+                if ticking {
+                    RecordSoundWaves(diameter: diameter,
+                                     elapsed: reduceMotion ? 0.8 : elapsed,
+                                     accent: accent)
+                        .frame(width: diameter * 1.22, height: diameter * 1.22)
+                        .allowsHitTesting(false)
+                }
+                VinylRecord(artwork: artwork, palette: palette, rotation: reduceMotion ? 0 : phase)
+                    .frame(width: diameter, height: diameter)
+            }
                 .frame(width: diameter, height: diameter)
                 .modifier(RecordSwipeGesture(diameter: diameter, reduceMotion: reduceMotion,
                                              trackID: music.enabled ? snapshot?.trackID : nil) { direction, trackID in
                     music.send(direction == .next ? .next : .previous, trackID: trackID)
                 })
-                .background {
-                    if spinning {
-                        RecordSoundWaves(diameter: diameter, elapsed: elapsed, accent: accent)
-                            .frame(width: diameter * 1.22, height: diameter * 1.22)
-                            .allowsHitTesting(false)
-                    }
-                }
                 .accessibilityHidden(true)
                 .overlay(alignment: .topLeading) {
                     let preview = pendingCue.flatMap { $0.trackID == snapshot?.trackID ? $0 : nil }
