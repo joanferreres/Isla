@@ -1,7 +1,7 @@
 import SwiftUI
 import IslandCore
 
-/// Onkyo-style sliding drawer with a rotary multi-disc carousel.
+/// Rotary multi-disc carousel integrated into the turntable field (no boxed drawer).
 struct RecordDiscChanger: View {
     let palette: RecordPlayerPalette
     let reduceMotion: Bool
@@ -31,7 +31,7 @@ struct RecordDiscChanger: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             trayChrome
             ZStack {
                 trayWell
@@ -42,13 +42,13 @@ struct RecordDiscChanger: View {
                         .font(.callout)
                         .foregroundStyle(palette.ink.opacity(0.7))
                         .multilineTextAlignment(.center)
-                        .padding(24)
+                        .padding(20)
                 } else {
                     carousel
                     centerPlay
                 }
             }
-            .frame(width: 340, height: 340)
+            .frame(width: 300, height: 300)
             if let selectedTrack {
                 VStack(spacing: 2) {
                     Text(selectedTrack.title)
@@ -65,27 +65,24 @@ struct RecordDiscChanger: View {
                 Text(status).font(.caption2).foregroundStyle(palette.accent).lineLimit(2)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .frame(width: 372)
-        .background(drawerShell)
+        .frame(width: 312)
         .task { await reload() }
     }
 
     private var trayChrome: some View {
         HStack {
-            Text((catalog?.name ?? "Cambiador").uppercased())
-                .font(.caption2.weight(.bold))
-                .tracking(1.2)
-                .foregroundStyle(palette.metal)
-            Spacer()
             Button(action: onClose) {
-                Image(systemName: "chevron.right")
+                Image(systemName: "chevron.left")
                     .font(.caption.weight(.bold))
                     .frame(width: 28, height: 28)
             }
             .buttonStyle(.borderless)
             .accessibilityLabel("Guardar cambiador")
+            Text((catalog?.name ?? "Cambiador").uppercased())
+                .font(.caption2.weight(.bold))
+                .tracking(1.2)
+                .foregroundStyle(palette.metal)
+            Spacer(minLength: 0)
         }
     }
 
@@ -93,22 +90,26 @@ struct RecordDiscChanger: View {
         Circle()
             .fill(
                 RadialGradient(
-                    colors: [Color(white: 0.16), Color(white: 0.05)],
+                    colors: [
+                        Color(nsColor: palette.background).opacity(0.15),
+                        Color.white.opacity(0.04),
+                        Color.black.opacity(0.35)
+                    ],
                     center: .center,
-                    startRadius: 20,
-                    endRadius: 170
+                    startRadius: 12,
+                    endRadius: 150
                 )
             )
             .overlay {
-                Circle().strokeBorder(palette.metal.opacity(0.28), lineWidth: 1.2)
+                Circle().strokeBorder(palette.metal.opacity(0.22), lineWidth: 1)
             }
             .overlay {
                 ForEach(0..<slotCount, id: \.self) { index in
                     let angle = Double(index) * step * .pi / 180
                     Circle()
-                        .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
-                        .frame(width: 96, height: 96)
-                        .offset(x: 108 * cos(angle - .pi / 2), y: 108 * sin(angle - .pi / 2))
+                        .strokeBorder(Color.white.opacity(0.05), lineWidth: 1)
+                        .frame(width: 86, height: 86)
+                        .offset(x: 96 * cos(angle - .pi / 2), y: 96 * sin(angle - .pi / 2))
                 }
             }
     }
@@ -118,7 +119,6 @@ struct RecordDiscChanger: View {
         return ZStack {
             ForEach(0..<visible, id: \.self) { offset in
                 let track = tracks[(selected + offset) % tracks.count]
-                // Selected (offset 0) sits at the front/bottom of the ring.
                 let theta = (Double(offset) * step - dragAngle) * .pi / 180
                 let depth = max(0.2, cos(theta))
                 ChangerDisc(
@@ -126,9 +126,9 @@ struct RecordDiscChanger: View {
                     palette: palette,
                     emphasized: offset == 0 && abs(dragAngle) < step * 0.35
                 )
-                .frame(width: 92, height: 92)
+                .frame(width: 82, height: 82)
                 .opacity(0.4 + 0.6 * depth)
-                .offset(x: 108 * sin(theta), y: 108 * cos(theta))
+                .offset(x: 96 * sin(theta), y: 96 * cos(theta))
                 .zIndex(depth * 10)
                 .allowsHitTesting(false)
                 .id(track.id)
@@ -167,9 +167,9 @@ struct RecordDiscChanger: View {
         } label: {
             ZStack {
                 Circle()
-                    .fill(Color(white: 0.12))
-                    .overlay(Circle().strokeBorder(palette.metal.opacity(0.5), lineWidth: 1.2))
-                    .frame(width: 78, height: 78)
+                    .fill(Color(white: 0.1).opacity(0.92))
+                    .overlay(Circle().strokeBorder(palette.metal.opacity(0.45), lineWidth: 1.1))
+                    .frame(width: 72, height: 72)
                 if busy {
                     ProgressView().controlSize(.small)
                 } else {
@@ -187,26 +187,14 @@ struct RecordDiscChanger: View {
         .zIndex(50)
     }
 
-    private var drawerShell: some View {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(Color(white: 0.07))
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-            }
-            .shadow(color: .black.opacity(0.5), radius: 22, x: -10, y: 8)
-    }
-
     private var drag: some Gesture {
         DragGesture(minimumDistance: 3)
             .updating($dragAngle) { value, angle, _ in
-                // Horizontal drag spins the carousel (positive = next track).
                 angle = Double(value.translation.width) * 0.45
             }
             .onEnded { value in
                 let delta = Double(value.translation.width) * 0.45
-                let slots = Int((delta / step).rounded())
-                nudgeSlots(slots)
+                nudgeSlots(Int((delta / step).rounded()))
             }
     }
 
@@ -326,10 +314,11 @@ private struct ChangerTrackpadWheel: NSViewRepresentable {
     }
 }
 
-/// Peeking disc tip on the trailing edge — press to eject the changer tray.
+/// Disc tip that hangs mostly outside the black player field — press to open the changer.
 struct RecordDiscChangerPeek: View {
     let palette: RecordPlayerPalette
     let artwork: NSImage?
+    let diameter: CGFloat
     let action: () -> Void
 
     var body: some View {
@@ -341,18 +330,18 @@ struct RecordDiscChangerPeek: View {
                     Image(nsImage: artwork)
                         .resizable()
                         .scaledToFill()
-                        .frame(width: 36, height: 36)
+                        .frame(width: diameter * 0.5, height: diameter * 0.5)
                         .clipShape(Circle())
                 } else {
                     Circle()
                         .fill(palette.accent.opacity(0.75))
-                        .frame(width: 36, height: 36)
+                        .frame(width: diameter * 0.5, height: diameter * 0.5)
                 }
-                Circle().fill(.black).frame(width: 6, height: 6)
+                Circle().fill(.black).frame(width: max(5, diameter * 0.08), height: max(5, diameter * 0.08))
             }
-            .frame(width: 72, height: 72)
-            .overlay(Circle().strokeBorder(.white.opacity(0.2), lineWidth: 1))
-            .shadow(color: .black.opacity(0.4), radius: 8, x: -2, y: 2)
+            .frame(width: diameter, height: diameter)
+            .overlay(Circle().strokeBorder(.white.opacity(0.22), lineWidth: 1))
+            .shadow(color: .black.opacity(0.45), radius: 10, x: 3, y: 2)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Abrir cambiador de discos")

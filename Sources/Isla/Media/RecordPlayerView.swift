@@ -88,47 +88,61 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
 
     var body: some View {
         GeometryReader { proxy in
-            let diameter = max(120, min(660, (proxy.size.width - 294) / 1.22, (proxy.size.height - 176) / 1.22))
+            // ~2/3 of the peek hangs outside the black field over the clear window strip.
+            let peekDiameter: CGFloat = 90
+            let peekOutside = peekDiameter * (2.0 / 3.0)
+            let changerWidth: CGFloat = 328
+            let leadingReserve = showsChanger ? changerWidth : (music.enabled ? peekOutside : 0)
+            let diameter = max(120, min(660,
+                                        (proxy.size.width - 294 - leadingReserve) / 1.22,
+                                        (proxy.size.height - 176) / 1.22))
             let snapshot = music.state.snapshot
             let ticking = presentation.isVisible && music.enabled && snapshot?.playing == true
             let spinning = ticking && !reduceMotion
-            ZStack(alignment: .trailing) {
-                HStack(spacing: diameter * 0.14 + 14) {
-                    turntable(diameter: diameter, snapshot: snapshot, ticking: ticking, spinning: spinning)
-                        .overlay {
-                            changerHandOffOverlay(diameter: diameter)
-                        }
-                    RecordPlayerMixer(music: music, palette: palette,
-                                      active: presentation.isVisible && music.enabled)
-                        .frame(width: 220)
-                        .opacity(showsChanger ? 0.22 : 1)
-                        .allowsHitTesting(!showsChanger)
+            ZStack(alignment: .leading) {
+                // Black player field — inset so the peek can protrude into clear chrome.
+                ZStack {
+                    HStack(spacing: diameter * 0.14 + 14) {
+                        turntable(diameter: diameter, snapshot: snapshot, ticking: ticking, spinning: spinning)
+                            .overlay {
+                                changerHandOffOverlay(diameter: diameter)
+                            }
+                        RecordPlayerMixer(music: music, palette: palette,
+                                          active: presentation.isVisible && music.enabled)
+                            .frame(width: 220)
+                            .opacity(showsChanger ? 0.35 : 1)
+                            .allowsHitTesting(!showsChanger)
+                    }
+                    .padding(.leading, diameter * 0.08)
+                    VStack {
+                        trackHeading(snapshot)
+                        Spacer(minLength: 0)
+                        playbackBar(snapshot, ticking: ticking)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 14)
                 }
-                .padding(.leading, diameter * 0.11)
-                .padding(.trailing, showsChanger ? 360 : 0)
-                VStack {
-                    trackHeading(snapshot)
-                    Spacer(minLength: 0)
-                    playbackBar(snapshot, ticking: ticking)
-                }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 14)
-                .padding(.trailing, showsChanger ? 360 : 0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.leading, leadingReserve)
+                .background(Color(nsColor: palette.background))
+
                 if music.enabled, !showsChanger, changerHandOff == nil {
+                    // Disc spans [0, peekDiameter]; black field starts at peekOutside → only ~1/3 inside.
                     RecordDiscChangerPeek(
                         palette: palette,
-                        artwork: artwork
+                        artwork: artwork,
+                        diameter: peekDiameter
                     ) {
                         withAnimation(reduceMotion ? nil : .snappy(duration: 0.38)) {
                             showsChanger = true
                         }
                     }
-                    // Only the tip peeks past the right edge of the notch UI.
-                    .offset(x: 40)
-                    .padding(.trailing, 4)
+                    .offset(x: 0)
+                    .frame(maxHeight: .infinity, alignment: .center)
                     .transition(.opacity)
-                    .zIndex(15)
+                    .zIndex(30)
                 }
+
                 if showsChanger {
                     RecordDiscChanger(
                         palette: palette,
@@ -144,17 +158,18 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                             await loadDiscFromChanger(trackID: track.id, incoming: incoming)
                         }
                     )
-                    .padding(.trailing, 10)
-                    .padding(.vertical, 18)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                    .zIndex(20)
+                    .padding(.leading, 12)
+                    .padding(.vertical, 24)
+                    .frame(maxHeight: .infinity, alignment: .center)
+                    .background(Color(nsColor: palette.background))
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+                    .zIndex(25)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .animation(reduceMotion ? nil : .snappy(duration: 0.36), value: showsChanger)
         }
         .foregroundStyle(ink)
-        .background(Color(nsColor: palette.background).ignoresSafeArea())
         .preferredColorScheme(.dark)
         .onChange(of: presentation.isVisible, initial: true) { _, visible in
             speakerBattery.setVisible(visible)
@@ -624,7 +639,8 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                         .frame(width: size, height: size)
                         .clipShape(Circle())
                         .overlay(Circle().strokeBorder(.white.opacity(0.15), lineWidth: 1))
-                        .offset(x: travel * handOff.progress, y: -travel * 0.12 * handOff.progress)
+                        // Changer lives on the left — disc leaves toward it.
+                        .offset(x: -travel * handOff.progress, y: -travel * 0.12 * handOff.progress)
                         .opacity(1 - Double(handOff.progress))
                         .scaleEffect(1 - 0.18 * handOff.progress)
                         .allowsHitTesting(false)
@@ -636,7 +652,7 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                         .frame(width: size, height: size)
                         .clipShape(Circle())
                         .overlay(Circle().strokeBorder(.white.opacity(0.2), lineWidth: 1))
-                        .offset(x: travel * (1 - handOff.progress), y: travel * 0.08 * (1 - handOff.progress))
+                        .offset(x: -travel * (1 - handOff.progress), y: travel * 0.08 * (1 - handOff.progress))
                         .opacity(0.35 + 0.65 * Double(handOff.progress))
                         .scaleEffect(0.82 + 0.18 * handOff.progress)
                         .allowsHitTesting(false)
