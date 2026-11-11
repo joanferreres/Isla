@@ -29,19 +29,28 @@ struct RecordDiscChanger: View {
     @State private var dragLastAngle: Double?
     @State private var snapTask: Task<Void, Never>?
 
-    private let slotCount = 6
-    private var step: Double { 360.0 / Double(slotCount) }
+    /// Angular spacing for the full ordered playlist on one ring.
+    private var spacing: Double {
+        let count = max(tracks.count, 1)
+        return 360.0 / Double(count)
+    }
     private var radius: CGFloat { diameter * 0.32 }
-    private var discSize: CGFloat { diameter * 0.28 }
+    private var discSize: CGFloat {
+        // Shrink a bit when many tracks share the ring so neighbours don’t paint over each other.
+        let count = max(tracks.count, 1)
+        let chord = radius * CGFloat(sin(spacing * .pi / 180))
+        return min(diameter * 0.28, max(diameter * 0.14, chord * 1.65))
+    }
 
     private var tracks: [MusicCassetteTrack] { catalog?.tracks ?? [] }
 
     /// Track currently at the right-hand front (+X), including mid-spin preview.
+    /// Absolute index on the ordered ring — never a remapped window.
     private var frontIndex: Int {
         guard !tracks.isEmpty else { return 0 }
-        let moved = Int((-ringAngle / step).rounded())
         let count = tracks.count
-        return ((selected + moved) % count + count) % count
+        let moved = Int((-ringAngle / spacing).rounded())
+        return ((moved % count) + count) % count
     }
 
     private var frontTrack: MusicCassetteTrack? {
@@ -70,15 +79,16 @@ struct RecordDiscChanger: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(frontTrack.title)
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(palette.ink.opacity(0.9))
                         .lineLimit(2)
                     if !frontTrack.artist.isEmpty {
                         Text(frontTrack.artist)
                             .font(.caption2)
-                            .foregroundStyle(palette.ink.opacity(0.55))
                             .lineLimit(1)
                     }
                 }
+                // Negative / inverted against whatever sits behind (disc art + panel).
+                .foregroundStyle(.white)
+                .blendMode(.difference)
                 .frame(width: max(96, diameter * 0.42), alignment: .leading)
                 .offset(x: diameter * 0.52, y: 0)
                 .allowsHitTesting(false)
@@ -128,39 +138,33 @@ struct RecordDiscChanger: View {
         Circle()
             .strokeBorder(palette.metal.opacity(0.18), lineWidth: 1)
             .frame(width: diameter * 0.92, height: diameter * 0.92)
-            .overlay {
-                ForEach(0..<slotCount, id: \.self) { index in
-                    let angle = (Double(index) * step + ringAngle) * .pi / 180
-                    Circle()
-                        .strokeBorder(Color.white.opacity(0.04), lineWidth: 1)
-                        .frame(width: discSize + 6, height: discSize + 6)
-                        .offset(x: radius * cos(angle), y: radius * sin(angle))
-                }
-            }
             .allowsHitTesting(false)
     }
 
     private var carousel: some View {
-        let visible = min(slotCount, max(tracks.count, 0))
-        // Stable ordered window: same playlist order, only the orbit angle changes.
+        let count = tracks.count
+        let spacing = self.spacing
+        // Absolute ordered ring: track i is always at angle i×spacing + ringAngle.
+        // Identities never remap between slots — artwork orbits with its own index.
         return ZStack {
-            ForEach(0..<visible, id: \.self) { slot in
-                let track = tracks[(selected + slot) % tracks.count]
-                let theta = (Double(slot) * step + ringAngle) * .pi / 180
-                let depth = max(0.12, cos(theta))
-                let atFront = abs(shortest(Double(slot) * step + ringAngle)) < step * 0.4
-                ChangerDisc(
-                    artwork: artworks[track.id],
-                    palette: palette,
-                    emphasized: atFront
-                )
-                .frame(width: discSize, height: discSize)
-                .opacity(0.28 + 0.72 * depth)
-                .offset(x: radius * cos(theta), y: radius * sin(theta))
-                .zIndex(depth * 10)
-                .allowsHitTesting(false)
-                // Identity stays on track id so order never “reshuffles” visually mid-spin.
-                .id(track.id)
+            ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                let degrees = Double(index) * spacing + ringAngle
+                let theta = degrees * .pi / 180
+                let depth = cos(theta)
+                // Draw the front hemisphere (and a little past) so the half-edge clip reads as a sequence.
+                if depth > -0.2 {
+                    let atFront = abs(shortest(degrees)) < max(spacing * 0.55, 8)
+                    ChangerDisc(
+                        artwork: artworks[track.id],
+                        palette: palette,
+                        emphasized: atFront
+                    )
+                    .frame(width: discSize, height: discSize)
+                    .opacity(0.25 + 0.75 * max(0.15, depth))
+                    .offset(x: radius * cos(theta), y: radius * sin(theta))
+                    .zIndex(depth * 10)
+                    .allowsHitTesting(false)
+                }
             }
         }
         .frame(width: diameter, height: diameter)
@@ -276,7 +280,7 @@ struct RecordDiscChanger: View {
         }
     }
 
-    /// Snap the ordered list so `selected` is the track at +X; does not touch Music / platter.
+    /// Snap so some playlist index sits at +X; order of `tracks` is unchanged.
     private func commitFrontSelection(animated: Bool) {
         guard !tracks.isEmpty else {
             turning = false
@@ -288,15 +292,16 @@ struct RecordDiscChanger: View {
         if animated, !reduceMotion, abs(velocity) > 60 {
             angle += velocity * 0.14
         }
-        let moved = Int((-angle / step).rounded())
         let count = tracks.count
-        let next = ((selected + moved) % count + count) % count
+        let spacing = self.spacing
+        let next = ((Int((-angle / spacing).rounded()) % count) + count) % count
+        let snapped = -Double(next) * spacing
         let animation = (animated && !reduceMotion)
             ? Animation.interpolatingSpring(stiffness: 240, damping: 24)
             : nil
         withAnimation(animation) {
             selected = next
-            ringAngle = 0
+            ringAngle = snapped
         }
         turning = false
         RecordGestureClaim.selectorActive = false
@@ -334,7 +339,7 @@ struct RecordDiscChanger: View {
             } else if selected >= catalog.tracks.count {
                 selected = 0
             }
-            ringAngle = 0
+            ringAngle = -Double(selected) * (360.0 / Double(max(catalog.tracks.count, 1)))
             turning = false
             RecordGestureClaim.selectorActive = false
             await prefetch(around: selected)
@@ -348,9 +353,10 @@ struct RecordDiscChanger: View {
         guard !tracks.isEmpty, delta != 0 else { return }
         snapTask?.cancel()
         let count = tracks.count
+        let spacing = self.spacing
         withAnimation(reduceMotion ? nil : .snappy(duration: 0.28)) {
             selected = ((selected + delta) % count + count) % count
-            ringAngle = 0
+            ringAngle = -Double(selected) * spacing
         }
         Task { await prefetch(around: selected) }
     }
@@ -358,8 +364,9 @@ struct RecordDiscChanger: View {
     private func prefetch(around index: Int) async {
         guard !tracks.isEmpty else { return }
         let count = tracks.count
-        for offset in 0..<min(slotCount, count) {
-            let track = tracks[(index + offset) % count]
+        // Warm covers around the front of the absolute ring.
+        for offset in -3...3 {
+            let track = tracks[((index + offset) % count + count) % count]
             guard artworks[track.id] == nil else { continue }
             if let data = try? await service.artwork(trackID: track.id),
                let image = NSImage(data: data) {
