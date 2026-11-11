@@ -5,6 +5,8 @@ import IslandCore
  @Published var state=MediaState()
  @Published var error:String?
  @Published var enabled=false
+ /// Prefetched covers for the playlist neighbours when Music can resolve them.
+ @Published private(set) var neighborArt=MusicNeighbors()
  let stream=SystemMediaStream()
  var receivedAt=Date()
  var retryStreamAfter=Date.distantPast
@@ -14,6 +16,7 @@ import IslandCore
  private var permissionDenied=false
  private var refreshing=false
  private var generation=0
+ private var neighborTask:Task<Void,Never>?
  init(reader:any AppleMusicReading=AppleMusicBridge()) { self.reader=reader }
  func connect() {
  guard !enabled else { return };permissionDenied=false;enabled=true;generation += 1
@@ -21,8 +24,10 @@ import IslandCore
  stream.onReply={ [weak self] reply in
  guard let self,self.enabled else { return }
  if let snapshot=reply.snapshot {
+ let changed=self.state.snapshot?.trackID != snapshot.trackID
  self.state.update(snapshot);self.receivedAt=Date();self.error=nil
  if let data=reply.artwork(for:snapshot.trackID) { _=self.state.acceptArtwork(data,for:snapshot.trackID) }
+ if changed { self.scheduleNeighborPrefetch(generation:self.generation) }
  } else { Task { await self.refresh() } }
  }
  stream.onStopped={ [weak self] in guard let self,self.enabled else { return };self.retryStreamAfter=Date().addingTimeInterval(60);self.startFallbackTimer();Task { await self.refresh() } }
@@ -41,11 +46,11 @@ import IslandCore
  guard let snapshot=state.snapshot else { return 0 }
  return min(snapshot.duration,max(0,snapshot.position+(snapshot.playing ? max(0,date.timeIntervalSince(receivedAt)) : 0)))
  }
- func pauseForSleep() { enabled=false;generation += 1;timer?.invalidate();timer=nil;stream.stop();if let observer { DistributedNotificationCenter.default().removeObserver(observer) };observer=nil }
- func disconnect() { enabled=false;stream.stop();generation += 1;timer?.invalidate();timer=nil;if let observer { DistributedNotificationCenter.default().removeObserver(observer) };observer=nil;state.update(nil) }
+ func pauseForSleep() { enabled=false;generation += 1;neighborTask?.cancel();neighborTask=nil;timer?.invalidate();timer=nil;stream.stop();if let observer { DistributedNotificationCenter.default().removeObserver(observer) };observer=nil }
+ func disconnect() { enabled=false;stream.stop();generation += 1;neighborTask?.cancel();neighborTask=nil;timer?.invalidate();timer=nil;if let observer { DistributedNotificationCenter.default().removeObserver(observer) };observer=nil;state.update(nil);neighborArt=MusicNeighbors() }
  func refresh() async {
  guard enabled,!refreshing,!permissionDenied else { return };refreshing=true;defer { refreshing=false };let current=generation
- guard await reader.isRunning() else { state.update(nil);error=nil;return }
+ guard await reader.isRunning() else { state.update(nil);neighborArt=MusicNeighbors();error=nil;return }
  do {
  let snapshot=try await reader.read();guard enabled,current == generation else { return }
  let changed=state.snapshot?.trackID != snapshot?.trackID
@@ -58,7 +63,24 @@ import IslandCore
  state.update(latest);receivedAt=Date()
  if let data,latest?.trackID == snapshot.trackID { _=state.acceptArtwork(data,for:snapshot.trackID) }
  }
- } catch { guard enabled,current == generation else { return };self.error=error.localizedDescription;state.update(nil);if (error as? MusicFailure)?.code == -1743 { permissionDenied=true;timer?.invalidate();timer=nil } }
+ if changed || (neighborArt.nextTrackID == nil && neighborArt.previousTrackID == nil) {
+  scheduleNeighborPrefetch(generation: current)
+ }
+ } catch { guard enabled,current == generation else { return };self.error=error.localizedDescription;state.update(nil);neighborArt=MusicNeighbors();if (error as? MusicFailure)?.code == -1743 { permissionDenied=true;timer?.invalidate();timer=nil } }
+ }
+ private func scheduleNeighborPrefetch(generation current:Int) {
+ neighborTask?.cancel()
+ neighborTask=Task { [reader] in
+ guard !Task.isCancelled else { return }
+ do {
+ let neighbors=try await reader.neighbors()
+ guard !Task.isCancelled,enabled,current == generation else { return }
+ neighborArt=neighbors ?? MusicNeighbors()
+ } catch {
+ guard !Task.isCancelled,enabled,current == generation else { return }
+ neighborArt=MusicNeighbors()
+ }
+ }
  }
  func cue(to progress:Double,trackID:String) {
  guard progress.isFinite,let snapshot=state.snapshot,snapshot.trackID == trackID,snapshot.duration.isFinite,snapshot.duration>0 else { return }

@@ -6,8 +6,8 @@
 <key>CFBundleName</key><string>IslaWidget</string>
 <key>CFBundleDisplayName</key><string>Tocadiscos</string>
 <key>CFBundlePackageType</key><string>XPC!</string>
-<key>CFBundleShortVersionString</key><string>0.8.44</string>
-<key>CFBundleVersion</key><string>74</string>
+<key>CFBundleShortVersionString</key><string>0.8.45</string>
+<key>CFBundleVersion</key><string>75</string>
 <key>LSMinimumSystemVersion</key><string>15.0</string>
 <key>NSExtension</key><dict>
 <key>NSExtensionPointIdentifier</key><string>com.apple.widgetkit-extension</string>

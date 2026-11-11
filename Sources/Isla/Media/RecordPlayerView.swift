@@ -115,6 +115,16 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                 artworkByTrack[trackID] = image
             }
         }
+        .onChange(of: music.neighborArt, initial: true) { _, neighbors in
+            if let id = neighbors.nextTrackID, let data = neighbors.nextArtwork,
+               let image = NSImage(data: data) {
+                artworkByTrack[id] = image
+            }
+            if let id = neighbors.previousTrackID, let data = neighbors.previousArtwork,
+               let image = NSImage(data: data) {
+                artworkByTrack[id] = image
+            }
+        }
         .onChange(of: music.state.snapshot?.trackID, initial: true) { previous, trackID in
             if let trackID {
                 remember(trackID)
@@ -200,13 +210,23 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
             .frame(width: diameter, height: diameter)
             .contentShape(Circle())
             .coordinateSpace(name: "recordPlatter")
-            .modifier(RecordSpinGesture(
+            .modifier(RecordPlatterGestures(
                 diameter: diameter,
-                enabled: music.enabled && snapshot != nil && !swapping,
                 reduceMotion: reduceMotion,
+                trackID: music.enabled ? snapshot?.trackID : nil,
+                spinEnabled: music.enabled && snapshot != nil && !swapping,
                 holding: $holdingPlatter,
                 rotation: $manualRotation,
-                onRelease: { velocity in
+                onSwapPreview: { offset in
+                    guard swapCommit == nil else { return }
+                    swapOffset = offset
+                    if abs(offset) < 0.5 { outgoingArtwork = nil }
+                    else if outgoingArtwork == nil { outgoingArtwork = artwork }
+                },
+                onSwapFinish: { swipe, trackID in
+                    finishSwap(swipe, trackID: trackID, diameter: diameter)
+                },
+                onSpinRelease: { velocity in
                     // frozenPhase was captured when the hand went down.
                     if abs(velocity) > 40 {
                         coastVelocity = max(-720, min(720, velocity))
@@ -215,19 +235,6 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                         manualRotation = 0
                         coastVelocity = 0
                     }
-                }
-            ))
-            .modifier(RecordSwipeGesture(
-                diameter: diameter,
-                trackID: music.enabled ? snapshot?.trackID : nil,
-                onPreview: { offset in
-                    guard swapCommit == nil else { return }
-                    swapOffset = offset
-                    if abs(offset) < 0.5 { outgoingArtwork = nil }
-                    else if outgoingArtwork == nil { outgoingArtwork = artwork }
-                },
-                onFinish: { swipe, trackID in
-                    finishSwap(swipe, trackID: trackID, diameter: diameter)
                 }
             ))
             .accessibilityHidden(true)
@@ -292,9 +299,13 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     private func incomingArtwork(for offset: CGFloat, commit: RecordSwipe?) -> NSImage? {
         let towardNext = commit.map { $0 == .next } ?? (offset < 0)
         if towardNext {
-            // Next track is unknown until Music advances; show a bare label unless history knows it.
+            if let id = music.neighborArt.nextTrackID, let image = artworkByTrack[id] { return image }
+            if let data = music.neighborArt.nextArtwork { return NSImage(data: data) }
+            // Fall back to a cover we already saw after skipping forward earlier in the session.
             return nil
         }
+        if let id = music.neighborArt.previousTrackID, let image = artworkByTrack[id] { return image }
+        if let data = music.neighborArt.previousArtwork { return NSImage(data: data) }
         guard let current = music.state.snapshot?.trackID,
               let index = trackHistory.lastIndex(of: current),
               index > 0 else {

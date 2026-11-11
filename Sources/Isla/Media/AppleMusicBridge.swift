@@ -1,7 +1,14 @@
 import AppKit
 import IslandCore
+struct MusicNeighbors:Codable,Sendable,Equatable {
+ var nextTrackID:String?
+ var nextArtwork:Data?
+ var previousTrackID:String?
+ var previousArtwork:Data?
+}
 struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Data?;var artworkTrackID:String?;var error:String?;var errorCode:Int?;var volume:Int?
  var playlists:[MusicPlaylist]?;var playlistContainsTrack:Bool?
+ var neighbors:MusicNeighbors?
  func artwork(for trackID:String) -> Data? { artworkTrackID == trackID ? artwork : nil }
 }
 @MainActor enum MusicHelper {
@@ -27,6 +34,43 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
  return {persistent ID of current track, raw data of artwork 1 of current track}
  on error
  return ""
+ end try
+ end tell
+ """
+ case "neighbors": source="""
+ tell application "Music"
+ if player state is stopped then return {}
+ set cur to current track
+ set curID to persistent ID of cur
+ try
+  set pl to current playlist
+  set total to count of tracks of pl
+  if total < 2 then return {}
+  set idx to 0
+  repeat with i from 1 to total
+   if persistent ID of track i of pl is equal to curID then
+    set idx to i
+    exit repeat
+   end if
+  end repeat
+  if idx is 0 then return {}
+  set nextI to idx + 1
+  if nextI > total then set nextI to 1
+  set prevI to idx - 1
+  if prevI < 1 then set prevI to total
+  set nt to track nextI of pl
+  set pt to track prevI of pl
+  set nextArt to ""
+  set prevArt to ""
+  try
+   set nextArt to raw data of artwork 1 of nt
+  end try
+  try
+   set prevArt to raw data of artwork 1 of pt
+  end try
+  return {persistent ID of nt, nextArt, persistent ID of pt, prevArt}
+ on error
+  return {}
  end try
  end tell
  """
@@ -64,6 +108,14 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
  else if operation == "read",let d=descriptor,d.numberOfItems == 6 {
  reply.snapshot=MediaSnapshot(trackID:d.atIndex(1)?.stringValue ?? "",title:d.atIndex(2)?.stringValue ?? "",artist:d.atIndex(3)?.stringValue ?? "",playing:d.atIndex(4)?.booleanValue ?? false,position:Double(d.atIndex(5)?.stringValue ?? "") ?? d.atIndex(5)?.doubleValue ?? 0,duration:Double(d.atIndex(6)?.stringValue ?? "") ?? d.atIndex(6)?.doubleValue ?? 0)
  } else if operation == "artwork",let descriptor,descriptor.numberOfItems == 2,let data=descriptor.atIndex(2)?.data,NSImage(data:data) != nil { reply.artwork=data;reply.artworkTrackID=descriptor.atIndex(1)?.stringValue }
+ else if operation == "neighbors", let descriptor, descriptor.numberOfItems == 4 {
+  var neighbors = MusicNeighbors()
+  neighbors.nextTrackID = descriptor.atIndex(1)?.stringValue
+  if let data = descriptor.atIndex(2)?.data, NSImage(data: data) != nil { neighbors.nextArtwork = data }
+  neighbors.previousTrackID = descriptor.atIndex(3)?.stringValue
+  if let data = descriptor.atIndex(4)?.data, NSImage(data: data) != nil { neighbors.previousArtwork = data }
+  if neighbors.nextTrackID != nil || neighbors.previousTrackID != nil { reply.neighbors = neighbors }
+ }
  }
  if let data=try? JSONEncoder().encode(reply) { FileHandle.standardOutput.write(data) }
  }
@@ -72,6 +124,7 @@ protocol AppleMusicReading:Sendable {
  func isRunning() async -> Bool
  func read() async throws -> MediaSnapshot?
  func artwork(trackID:String) async throws -> Data?
+ func neighbors() async throws -> MusicNeighbors?
  func send(_ command:MediaCommand) async throws
  func volume(_ value: Int?) async throws -> Int
 }
@@ -108,6 +161,10 @@ actor AppleMusicBridge:AppleMusicReading {
  func artwork(trackID:String) async throws -> Data? {
  if trackID.hasPrefix("mediaremote:") { return systemReply?.artwork(for:trackID) }
  return try query("artwork").artwork(for:trackID)
+ }
+ func neighbors() async throws -> MusicNeighbors? {
+ // Playlist-relative peek via AppleScript. Radio / Autoplay / some cloud queues return nil.
+ try query("neighbors").neighbors
  }
  func volume(_ value: Int?) async throws -> Int {
  guard let volume = try query("volume", argument: value.map(String.init)).volume else {
