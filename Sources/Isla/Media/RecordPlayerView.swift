@@ -46,6 +46,17 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     @State private var artwork: NSImage?
     @State private var showsAmbiences = false
     @State private var pendingCue: PendingCue?
+    @State private var artworkByTrack: [String: NSImage] = [:]
+    @State private var trackHistory: [String] = []
+    @State private var swapOffset: CGFloat = 0
+    @State private var swapCommit: RecordSwipe?
+    @State private var outgoingArtwork: NSImage?
+    @State private var holdingPlatter = false
+    @State private var manualRotation = 0.0
+    @State private var spinBias = 0.0
+    @State private var frozenPhase = 0.0
+    @State private var lastPhase = 0.0
+    @State private var coastVelocity = 0.0
 
     private struct PendingCue: Equatable {
         let trackID: String
@@ -98,12 +109,44 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
         .onChange(of: presentation.isVisible, initial: true) { _, visible in speakerBattery.setVisible(visible) }
         .onDisappear { speakerBattery.setVisible(false) }
         .onChange(of: music.state.artworkData, initial: true) { _, data in
-            artwork = data.flatMap(NSImage.init(data:))
+            let image = data.flatMap(NSImage.init(data:))
+            artwork = image
+            if let image, let trackID = music.state.snapshot?.trackID {
+                artworkByTrack[trackID] = image
+            }
+        }
+        .onChange(of: music.state.snapshot?.trackID, initial: true) { previous, trackID in
+            if let trackID {
+                remember(trackID)
+                if swapCommit != nil {
+                    // New record landed: drop the outgoing disc and centre the incoming art.
+                    let settle = reduceMotion ? nil : Animation.snappy(duration: 0.28)
+                    withAnimation(settle) {
+                        swapOffset = 0
+                        swapCommit = nil
+                        outgoingArtwork = nil
+                    }
+                    manualRotation = 0
+                    spinBias = 0
+                    coastVelocity = 0
+                } else if previous != nil, previous != trackID {
+                    manualRotation = 0
+                    spinBias = 0
+                    coastVelocity = 0
+                }
+            }
+            _ = previous
         }
         .onChange(of: music.state.snapshot) { _, snapshot in
             guard let cue = pendingCue else { return }
             if let snapshot, snapshot.trackID == cue.trackID, !cue.isConfirmed(by: snapshot) { return }
             pendingCue = nil
+        }
+        .onChange(of: holdingPlatter) { _, holding in
+            if holding {
+                frozenPhase = lastPhase
+                coastVelocity = 0
+            }
         }
         .onChange(of: music.error) { _, error in
             if error != nil { pendingCue = nil }
@@ -117,57 +160,116 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
 
     private func turntable(diameter: CGFloat, snapshot: MediaSnapshot?, ticking: Bool, spinning: Bool) -> some View {
         let width = diameter * RecordCue.armWidth
+        let swapping = abs(swapOffset) > 0.5 || swapCommit != nil
         // Stay scheduled while audio is playing so the tonearm/progress keep moving.
-        // Spin and waves still freeze when Reduce Motion is on.
-        return TimelineView(.animation(minimumInterval: spinning ? 1.0 / 60 : 1, paused: !ticking)) { context in
+        // Also tick while the platter is coasting after a hand spin.
+        let coasting = abs(coastVelocity) > 1
+        let live = ticking || coasting || holdingPlatter
+        return TimelineView(.animation(minimumInterval: (spinning || coasting) ? 1.0 / 60 : 1, paused: !live)) { context in
             let elapsed = playbackSeconds(snapshot, at: context.date)
             let duration = snapshot?.duration ?? 0
             let progress = duration > 0 ? min(1, elapsed / duration) : 0
             let phase = spinning ? elapsed.truncatingRemainder(dividingBy: 3.6) * 100 : 0
+            let platterPhase = (holdingPlatter || coasting) ? frozenPhase : phase
+            let rotation = platterPhase + manualRotation + spinBias
             let playing = snapshot?.playing == true
+            let incoming = incomingArtwork(for: swapOffset, commit: swapCommit)
+            let frontArt = outgoingArtwork ?? artwork
             ZStack {
-                if ticking {
+                if ticking && !swapping {
                     RecordSoundWaves(diameter: diameter,
-                                     elapsed: spinning ? elapsed : 0.8,
+                                     elapsed: spinning && !holdingPlatter ? elapsed : 0.8,
                                      accent: accent)
                         .frame(width: diameter * 1.22, height: diameter * 1.22)
                         .allowsHitTesting(false)
                 }
-                VinylRecord(artwork: artwork, palette: palette, rotation: phase)
-                    .frame(width: diameter, height: diameter)
-            }
-                .frame(width: diameter, height: diameter)
-                .modifier(RecordSwipeGesture(diameter: diameter, reduceMotion: reduceMotion,
-                                             trackID: music.enabled ? snapshot?.trackID : nil) { direction, trackID in
-                    music.send(direction == .next ? .next : .previous, trackID: trackID)
-                })
-                .accessibilityHidden(true)
-                .overlay(alignment: .topLeading) {
-                    let preview = pendingCue.flatMap { $0.trackID == snapshot?.trackID ? $0 : nil }
-                    Tonearm(angle: preview?.angle ?? (playing ? RecordCue.angle(at: progress) : 0),
-                            trackID: snapshot?.trackID, playing: playing, progress: progress,
-                            canSeek: duration.isFinite && duration > 0, palette: palette,
-                            animation: reduceMotion ? nil : .easeInOut(duration: 0.26),
-                            tap: {
-                                guard let snapshot else { return }
-                                if playing {
-                                    parkArm(for: snapshot)
-                                } else {
-                                    music.send(.playPause, trackID: snapshot.trackID)
-                                }
-                            },
-                            drop: { fraction in
-                                guard let snapshot else { return }
-                                if let fraction {
-                                    // Hold the chosen groove while Music reports the new position.
-                                    pendingCue = PendingCue(trackID: snapshot.trackID, fraction: fraction)
-                                    music.cue(to: fraction, trackID: snapshot.trackID)
-                                } else if playing || pendingCue?.fraction != nil {
-                                    parkArm(for: snapshot)
-                                }
-                            })
-                    .frame(width: width, height: diameter)
+                if swapping {
+                    VinylRecord(artwork: incoming, palette: palette, rotation: rotation * 0.35)
+                        .frame(width: diameter, height: diameter)
+                        .scaleEffect(0.94 + 0.06 * min(1, abs(swapOffset) / max(1, diameter * 0.55)))
+                        .offset(x: incomingOffset(swapOffset, diameter: diameter))
+                        .opacity(0.88)
+                        .allowsHitTesting(false)
                 }
+                VinylRecord(artwork: frontArt, palette: palette, rotation: rotation)
+                    .frame(width: diameter, height: diameter)
+                    .rotationEffect(.degrees(Double(swapOffset / max(1, diameter)) * 16))
+                    .offset(x: swapOffset)
+                    .opacity(swapping ? max(0.35, 1 - abs(swapOffset) / max(1, diameter * 0.9)) : 1)
+            }
+            .frame(width: diameter, height: diameter)
+            .contentShape(Circle())
+            .coordinateSpace(name: "recordPlatter")
+            .modifier(RecordSpinGesture(
+                diameter: diameter,
+                enabled: music.enabled && snapshot != nil && !swapping,
+                reduceMotion: reduceMotion,
+                holding: $holdingPlatter,
+                rotation: $manualRotation,
+                onRelease: { velocity in
+                    // frozenPhase was captured when the hand went down.
+                    if abs(velocity) > 40 {
+                        coastVelocity = max(-720, min(720, velocity))
+                    } else {
+                        spinBias = (frozenPhase + manualRotation + spinBias) - phase
+                        manualRotation = 0
+                        coastVelocity = 0
+                    }
+                }
+            ))
+            .modifier(RecordSwipeGesture(
+                diameter: diameter,
+                trackID: music.enabled ? snapshot?.trackID : nil,
+                onPreview: { offset in
+                    guard swapCommit == nil else { return }
+                    swapOffset = offset
+                    if abs(offset) < 0.5 { outgoingArtwork = nil }
+                    else if outgoingArtwork == nil { outgoingArtwork = artwork }
+                },
+                onFinish: { swipe, trackID in
+                    finishSwap(swipe, trackID: trackID, diameter: diameter)
+                }
+            ))
+            .accessibilityHidden(true)
+            .overlay(alignment: .topLeading) {
+                let preview = pendingCue.flatMap { $0.trackID == snapshot?.trackID ? $0 : nil }
+                Tonearm(angle: preview?.angle ?? (playing ? RecordCue.angle(at: progress) : 0),
+                        trackID: snapshot?.trackID, playing: playing, progress: progress,
+                        canSeek: duration.isFinite && duration > 0 && !swapping, palette: palette,
+                        animation: reduceMotion ? nil : .easeInOut(duration: 0.26),
+                        tap: {
+                            guard let snapshot else { return }
+                            if playing {
+                                parkArm(for: snapshot)
+                            } else {
+                                music.send(.playPause, trackID: snapshot.trackID)
+                            }
+                        },
+                        drop: { fraction in
+                            guard let snapshot else { return }
+                            if let fraction {
+                                // Hold the chosen groove while Music reports the new position.
+                                pendingCue = PendingCue(trackID: snapshot.trackID, fraction: fraction)
+                                music.cue(to: fraction, trackID: snapshot.trackID)
+                            } else if playing || pendingCue?.fraction != nil {
+                                parkArm(for: snapshot)
+                            }
+                        })
+                .frame(width: width, height: diameter)
+            }
+            .onChange(of: context.date) { _, _ in
+                if coasting, !holdingPlatter {
+                    manualRotation += coastVelocity / 60
+                    coastVelocity *= 0.935
+                    if abs(coastVelocity) <= 8 {
+                        spinBias = (frozenPhase + manualRotation + spinBias) - phase
+                        manualRotation = 0
+                        coastVelocity = 0
+                    }
+                } else if !holdingPlatter {
+                    lastPhase = phase
+                }
+            }
         }
         .frame(width: diameter, height: diameter)
     }
@@ -175,6 +277,67 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     private func parkArm(for snapshot: MediaSnapshot) {
         pendingCue = PendingCue(trackID: snapshot.trackID, fraction: nil)
         music.send(.pause, trackID: snapshot.trackID)
+    }
+
+    private func remember(_ trackID: String) {
+        trackHistory.removeAll { $0 == trackID }
+        trackHistory.append(trackID)
+        if trackHistory.count > 24 { trackHistory.removeFirst(trackHistory.count - 24) }
+        if artworkByTrack.count > 32 {
+            let keep = Set(trackHistory)
+            artworkByTrack = artworkByTrack.filter { keep.contains($0.key) }
+        }
+    }
+
+    private func incomingArtwork(for offset: CGFloat, commit: RecordSwipe?) -> NSImage? {
+        let towardNext = commit.map { $0 == .next } ?? (offset < 0)
+        if towardNext {
+            // Next track is unknown until Music advances; show a bare label unless history knows it.
+            return nil
+        }
+        guard let current = music.state.snapshot?.trackID,
+              let index = trackHistory.lastIndex(of: current),
+              index > 0 else {
+            return trackHistory.dropLast().last.flatMap { artworkByTrack[$0] }
+        }
+        return artworkByTrack[trackHistory[index - 1]]
+    }
+
+    private func incomingOffset(_ offset: CGFloat, diameter: CGFloat) -> CGFloat {
+        let park = diameter * 0.92
+        if offset == 0, swapCommit == nil { return park }
+        let towardNext = swapCommit.map { $0 == .next } ?? (offset < 0)
+        let start = towardNext ? park : -park
+        return start + offset
+    }
+
+    private func finishSwap(_ swipe: RecordSwipe?, trackID: String, diameter: CGFloat) {
+        guard let swipe else {
+            let animation = reduceMotion ? nil : Animation.snappy(duration: 0.24)
+            withAnimation(animation) {
+                swapOffset = 0
+                outgoingArtwork = nil
+            }
+            return
+        }
+        outgoingArtwork = outgoingArtwork ?? artwork
+        let exit = (swipe == .next ? -1 : 1) * diameter * 1.02
+        let animation = reduceMotion ? nil : Animation.snappy(duration: 0.32)
+        withAnimation(animation) {
+            swapOffset = exit
+            swapCommit = swipe
+        }
+        music.send(swipe == .next ? .next : .previous, trackID: trackID)
+        // If Music never changes track, fold the preview back.
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2.4))
+            guard swapCommit == swipe else { return }
+            withAnimation(reduceMotion ? nil : .snappy(duration: 0.28)) {
+                swapOffset = 0
+                swapCommit = nil
+                outgoingArtwork = nil
+            }
+        }
     }
 
     private func playbackSeconds(_ snapshot: MediaSnapshot?, at date: Date) -> Double {
