@@ -2,8 +2,7 @@ import SwiftUI
 import IslandCore
 
 /// Half-clipped rotary disc selector on the window’s leading edge — no boxed panel.
-/// Spins a **stable ordered** playlist ring with a short evenly spaced visible arc;
-/// the main turntable never changes until Play.
+/// Spins a **stable ordered** playlist ring; hover fans discs out; click a disc to play.
 struct RecordDiscChanger: View {
     let palette: RecordPlayerPalette
     let reduceMotion: Bool
@@ -26,13 +25,14 @@ struct RecordDiscChanger: View {
     @State private var samples: [(Date, Double)] = []
     @State private var dragLastAngle: Double?
     @State private var snapTask: Task<Void, Never>?
+    @State private var hovering = false
 
-    /// Fixed visual gap between neighbours — never pack the whole playlist onto 360°.
-    private let slotSpacing = 28.0
     /// How many discs to either side of the front (7 total).
     private let sideSlots = 3
-    private var radius: CGFloat { diameter * 0.34 }
-    private var discSize: CGFloat { diameter * 0.24 }
+    /// Resting angular gap; hover widens this so discs spread away from the front.
+    private var slotSpacing: Double { hovering ? 42.0 : 26.0 }
+    private var radius: CGFloat { diameter * (hovering ? 0.42 : 0.32) }
+    private var discSize: CGFloat { diameter * (hovering ? 0.22 : 0.24) }
 
     private var tracks: [MusicCassetteTrack] { catalog?.tracks ?? [] }
 
@@ -64,8 +64,11 @@ struct RecordDiscChanger: View {
                     .offset(x: diameter * 0.22)
             } else {
                 carousel
-                centerPlay
                 selectionTitle
+                if busy {
+                    ProgressView().controlSize(.small)
+                        .offset(x: diameter * 0.22)
+                }
             }
             if let status {
                 Text(status)
@@ -87,16 +90,21 @@ struct RecordDiscChanger: View {
         }
         .gesture(angularDrag)
         .contentShape(Path(CGRect(x: diameter * 0.5, y: 0, width: diameter * 0.5, height: diameter)))
-        .help(frontTrack.map { "\($0.title) — gira para elegir; Play para el plato" } ?? "Cambiador de discos")
+        .onHover { inside in
+            withAnimation(reduceMotion ? nil : .snappy(duration: 0.28)) {
+                hovering = inside
+            }
+        }
+        .help(frontTrack.map { "\($0.title) — gira o haz clic en un disco para reproducir" } ?? "Cambiador de discos")
         .task(id: "\(currentTitle ?? "")|\(currentArtist ?? "")") { await reload() }
         .onDisappear {
             snapTask?.cancel()
             RecordGestureClaim.selectorActive = false
         }
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Cambiador de discos")
         .accessibilityValue(frontTrack.map(\.title) ?? "")
-        .accessibilityHint("Gira con dos dedos; Play pone esa canción en el tocadiscos")
+        .accessibilityHint("Gira con dos dedos o haz clic en un disco para ponerlo en el tocadiscos")
         .accessibilityAdjustableAction { direction in
             switch direction {
             case .increment: nudgeSlots(1)
@@ -104,39 +112,51 @@ struct RecordDiscChanger: View {
             @unknown default: break
             }
         }
+        .accessibilityAction(.default) {
+            if let frontTrack { play(frontTrack) }
+        }
     }
 
     private var ringWell: some View {
         Circle()
-            .strokeBorder(palette.metal.opacity(0.18), lineWidth: 1)
+            .strokeBorder(palette.metal.opacity(hovering ? 0.28 : 0.18), lineWidth: 1)
             .frame(width: diameter * 0.92, height: diameter * 0.92)
             .allowsHitTesting(false)
     }
 
-    /// Only a short evenly spaced arc — same playlist order, no full-ring packing.
+    /// Short evenly spaced arc — fans out on hover; each disc is tappable.
     private var carousel: some View {
         let count = tracks.count
+        let spacing = slotSpacing
+        let orbit = radius
         return ZStack {
             ForEach(visibleEntries(count: count), id: \.index) { entry in
-                let degrees = entry.delta * slotSpacing
+                let degrees = entry.delta * spacing
                 let theta = degrees * .pi / 180
                 let depth = cos(theta)
                 let atFront = abs(entry.delta) < 0.5
-                ChangerDisc(
-                    artwork: artworks[entry.track.id],
-                    palette: palette,
-                    emphasized: atFront
-                )
-                .frame(width: discSize, height: discSize)
-                .opacity(0.35 + 0.65 * max(0.2, depth))
-                .scaleEffect(atFront ? 1.06 : max(0.82, 0.92 + 0.08 * depth))
-                .offset(x: radius * cos(theta), y: radius * sin(theta))
-                .zIndex(depth * 10)
-                .allowsHitTesting(false)
+                Button {
+                    play(entry.track, selecting: entry.index)
+                } label: {
+                    ChangerDisc(
+                        artwork: artworks[entry.track.id],
+                        palette: palette,
+                        emphasized: atFront || hovering
+                    )
+                    .frame(width: discSize, height: discSize)
+                    .opacity(0.35 + 0.65 * max(0.2, depth))
+                    .scaleEffect(atFront ? 1.08 : max(0.8, 0.9 + 0.1 * depth))
+                }
+                .buttonStyle(.plain)
+                .disabled(busy)
+                .offset(x: orbit * cos(theta), y: orbit * sin(theta))
+                .zIndex(50 + depth * 10)
+                .accessibilityLabel(entry.track.title)
+                .accessibilityHint("Reproduce en el tocadiscos")
             }
         }
         .frame(width: diameter, height: diameter)
-        .allowsHitTesting(false)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.28), value: hovering)
     }
 
     private var selectionTitle: some View {
@@ -170,41 +190,23 @@ struct RecordDiscChanger: View {
         }
     }
 
-    private var centerPlay: some View {
-        Button {
-            let track = frontTrack
-            commitFrontSelection(animated: false)
-            guard let track else { return }
-            Task {
-                busy = true
-                status = nil
-                defer { busy = false }
-                if let message = await onPlay(track, artworks[track.id]) {
-                    status = message
-                }
+    private func play(_ track: MusicCassetteTrack, selecting index: Int? = nil) {
+        if let index {
+            snapTask?.cancel()
+            withAnimation(reduceMotion ? nil : .snappy(duration: 0.22)) {
+                cursor = Double(index)
             }
-        } label: {
-            ZStack {
-                Circle()
-                    .fill(Color(white: 0.1).opacity(0.9))
-                    .overlay(Circle().strokeBorder(palette.metal.opacity(0.4), lineWidth: 1))
-                    .frame(width: diameter * 0.2, height: diameter * 0.2)
-                if busy {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: "play.fill")
-                        .font(.body.weight(.bold))
-                        .foregroundStyle(palette.accent)
-                        .offset(x: 1)
-                }
+        } else {
+            commitFrontSelection(animated: false)
+        }
+        Task {
+            busy = true
+            status = nil
+            defer { busy = false }
+            if let message = await onPlay(track, artworks[track.id]) {
+                status = message
             }
         }
-        .buttonStyle(.plain)
-        .disabled(busy || frontTrack == nil)
-        .offset(x: diameter * 0.02)
-        .accessibilityLabel("Play")
-        .accessibilityHint("Reproduce la canción seleccionada en el tocadiscos")
-        .zIndex(50)
     }
 
     private struct VisibleEntry {
