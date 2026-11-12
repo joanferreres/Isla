@@ -513,7 +513,8 @@ private struct ChangerTurnSurface: NSViewRepresentable {
                 DispatchQueue.main.async { self.onFinish?(true) }
                 return nil
             }
-            let degrees = Double(event.rotation)
+            // Match inverted scroll so rotate gestures share the same sense of spin.
+            let degrees = -Double(event.rotation)
             if degrees != 0 {
                 DispatchQueue.main.async { self.onTorque?(degrees) }
             }
@@ -541,7 +542,8 @@ private struct ChangerTurnSurface: NSViewRepresentable {
                 DispatchQueue.main.async { self.onFinish?(true) }
                 return nil
             }
-            let direction: CGFloat = event.isDirectionInvertedFromDevice ? 1 : -1
+            // Natural trackpad scroll felt inverted on the half-ring — flip torque sign.
+            let direction: CGFloat = event.isDirectionInvertedFromDevice ? -1 : 1
             let dx = direction * event.scrollingDeltaX
             let dy = direction * event.scrollingDeltaY
             let fromCenter = CGPoint(x: point.x - bounds.midX, y: point.y - bounds.midY)

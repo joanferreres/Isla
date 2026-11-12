@@ -288,7 +288,14 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
   play t
   return targetID
  on error
-  return {}
+  -- Suggested / upcoming picks may sit outside the (empty) current playlist.
+  try
+   set t to first track whose persistent ID is targetID
+   play t
+   return targetID
+  on error
+   return {}
+  end try
  end try
  end tell
  """

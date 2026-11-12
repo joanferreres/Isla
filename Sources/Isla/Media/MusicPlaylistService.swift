@@ -20,13 +20,18 @@ actor MusicPlaylistService {
         return catalog
     }
 
-    /// Active playlist only — never bleed library / random samples into the changer.
+    /// Active playlist when it has songs; otherwise upcoming / suggested next tracks.
+    /// Does not fall through to a random library sample while a playlist has tracks.
     func changerCatalog() async throws -> MusicPlaylistCatalog {
-        guard let catalog = try await bridge.query("playlistTracks").playlistCatalog,
-              !catalog.tracks.isEmpty else {
-            throw MusicFailure(message: "No hay canciones en la playlist activa de Música.")
+        if let catalog = try? await bridge.query("playlistTracks").playlistCatalog,
+           !catalog.tracks.isEmpty {
+            return catalog
         }
-        return catalog
+        if let catalog = try? await bridge.query("upcomingTracks").playlistCatalog,
+           !catalog.tracks.isEmpty {
+            return catalog
+        }
+        throw MusicFailure(message: "No hay canciones en la playlist ni próximas sugeridas.")
     }
 
     func playPlaylist(_ playlist: MusicPlaylist) async throws {
