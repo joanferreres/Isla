@@ -13,6 +13,16 @@ enum MixerBand: String, CaseIterable, Sendable {
         }
     }
 
+    /// Music EQ preset band numbers (1…10). Preamp is separate.
+    var bandNumbers: ClosedRange<Int> {
+        switch self {
+        case .bass: 1...4
+        case .mid: 5...7
+        case .treble: 8...10
+        }
+    }
+
+    /// AX equalizer sliders: index 0 = preamp, 1…10 = bands.
     var sliderIndices: Range<Int> {
         switch self {
         case .bass: 1..<5
@@ -33,6 +43,9 @@ struct MusicEqualizerScale {
     func nativeValue(_ decibels: Double) -> Double { decibels * unitsPerDecibel }
 }
 
+/// Drives Music EQ through the modifiable **Manual** preset via AppleScript.
+/// AX is only used to turn EQ On and select Manual when needed; the native
+/// Equalizer window may stay hidden/closed afterward — band writes still apply.
 actor MusicEqualizer {
     private struct Controls {
         let toggle: AXUIElement
@@ -63,21 +76,27 @@ actor MusicEqualizer {
         }
     }
 
+    private let manualPreset = "Manual"
+    private var desired: [MixerBand: Double] = Dictionary(
+        uniqueKeysWithValues: MixerBand.allCases.map { ($0, 0.0) }
+    )
+
     func read() throws -> [MixerBand: Double] {
+        if let gains = try? readManualGains() {
+            desired = gains
+            return gains
+        }
         let controls = try findControls()
-        return controls.gains(for: controls.values)
+        let gains = controls.gains(for: controls.values)
+        desired = gains
+        return gains
     }
 
-    /// Factory / built-in EQ preset names from Music (AppleScript).
     func presetNames() throws -> [String] {
         let source = """
         tell application "Music" to get name of every EQ preset
         """
-        var error: NSDictionary?
-        guard let descriptor = NSAppleScript(source: source)?.executeAndReturnError(&error) else {
-            if (error?[NSAppleScript.errorNumber] as? Int) == -1743 { throw Failure.access }
-            throw Failure.unresponsive
-        }
+        let descriptor = try runAppleScript(source)
         var names: [String] = []
         if descriptor.descriptorType == typeAEList || descriptor.numberOfItems > 0 {
             for index in 1...max(descriptor.numberOfItems, 0) {
@@ -95,85 +114,187 @@ actor MusicEqualizer {
     }
 
     func currentPresetName() throws -> String? {
-        let controls = try findControls()
-        return popupTitle(controls.popup)
+        if let title = try? appleScriptString("""
+            tell application "Music"
+              try
+                return name of current EQ preset
+              on error
+                return ""
+              end try
+            end tell
+            """), !title.isEmpty {
+            return title
+        }
+        if let controls = try? findControls() {
+            return popupTitle(controls.popup)
+        }
+        return nil
     }
 
     func set(_ gain: Double, for band: MixerBand) async throws -> [MixerBand: Double] {
         guard gain.isFinite else { throw Failure.unresponsive }
-        let controls = try await openControlsIfNeeded()
-        return try apply(min(12, max(-12, gain)), to: band.sliderIndices, enabled: true, controls: controls)
+        desired[band] = min(12, max(-12, gain)).rounded()
+        try writeManualBands(from: desired)
+        try await ensureManualEQEnabled()
+        // Re-write after enabling Manual so Music applies the curve to playback.
+        try writeManualBands(from: desired)
+        return desired
     }
 
-    /// Applies a Music EQ preset and leaves EQ enabled so it keeps working with Isla closed.
+    /// Applies a Music EQ preset onto Manual (so knobs stay in sync) and leaves EQ On.
     func selectPreset(_ name: String) async throws -> [MixerBand: Double] {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw Failure.preset }
-        let controls = try await openControlsIfNeeded()
-        do {
-            try await selectPresetViaPopup(trimmed, popup: controls.popup)
-        } catch {
-            try applyPresetBands(trimmed)
-        }
-        let live = try findControls()
-        try setEnabled(true, on: live.toggle)
-        let confirmed = try findControls()
-        parkEqualizerWindows()
-        return confirmed.gains(for: confirmed.values)
+        let bands = try readPresetBands(trimmed)
+        let gains = gainsFromBands(bands)
+        desired = gains
+        try writeManualRaw(bands)
+        try await ensureManualEQEnabled()
+        try writeManualRaw(bands)
+        return desired
     }
 
     func reset() async throws -> [MixerBand: Double] {
-        let controls = try await openControlsIfNeeded()
-        let result = try apply(0, to: controls.sliders.indices, enabled: false, controls: controls)
-        parkEqualizerWindows()
-        return result
+        desired = Dictionary(uniqueKeysWithValues: MixerBand.allCases.map { ($0, 0.0) })
+        try writeManualBands(from: desired)
+        // Prefer disabling via AX when possible; Manual stays flat either way.
+        if let controls = try? await openControlsIfNeeded() {
+            try? setEnabled(false, on: controls.toggle)
+            hideEqualizerWindow()
+        }
+        return desired
     }
 
-    private func apply(_ gain: Double, to indices: Range<Int>, enabled: Bool, controls: Controls) throws -> [MixerBand: Double] {
-        guard let originalSwitch = number(controls.toggle, kAXValueAttribute) else { throw Failure.unresponsive }
-        // Enabling first preserves Music's selected curve. Cycling the switch
-        // after a write can reload the preset and undo the user's adjustment.
-        // Re-resolve controls afterwards: toggling can rebuild the equalizer AX tree
-        // and leave the previous slider references unable to accept writes.
-        do {
-            try setEnabled(enabled, on: controls.toggle)
-        } catch {
-            try? setEnabled(originalSwitch == 1, on: controls.toggle)
-            throw error
-        }
-        let live: Controls
-        do {
-            live = try findControls()
-        } catch {
-            try? setEnabled(originalSwitch == 1, on: controls.toggle)
-            throw error
-        }
-        let nativeGain = live.scale.nativeValue(gain)
-        let changed = indices.filter { live.values[$0] != nativeGain }
-        var values = live.values
-        do {
-            for index in changed {
-                let slider = live.sliders[index]
-                guard AXUIElementSetAttributeValue(slider, kAXValueAttribute as CFString, NSNumber(value: nativeGain)) == .success else {
-                    throw Failure.unresponsive
-                }
-            }
-            for index in changed {
-                guard let actual = number(live.sliders[index], kAXValueAttribute),
-                      abs(live.scale.decibels(actual) - gain) <= 0.51 else { throw Failure.unresponsive }
-                values[index] = actual
-            }
-        } catch {
-            for index in changed {
-                _ = AXUIElementSetAttributeValue(live.sliders[index], kAXValueAttribute as CFString,
-                                                 NSNumber(value: live.values[index]))
-            }
-            try? setEnabled(originalSwitch == 1, on: live.toggle)
-            throw error
-        }
-        parkEqualizerWindows()
-        return live.gains(for: values)
+    // MARK: - AppleScript Manual preset (works with EQ window hidden/closed)
+
+    private func readManualGains() throws -> [MixerBand: Double] {
+        gainsFromBands(try readPresetBands(manualPreset))
     }
+
+    private func gainsFromBands(_ bands: [Double]) -> [MixerBand: Double] {
+        // bands[0] = preamp, bands[1...10] = EQ bands
+        Dictionary(uniqueKeysWithValues: MixerBand.allCases.map { band in
+            let slice = band.bandNumbers.map { bands[$0] }
+            let average = slice.reduce(0, +) / Double(slice.count)
+            return (band, average.rounded())
+        })
+    }
+
+    private func readPresetBands(_ name: String) throws -> [Double] {
+        let escaped = escapeAppleScript(name)
+        let source = """
+        tell application "Music"
+          set p to first EQ preset whose name is "\(escaped)"
+          return {preamp of p, band 1 of p, band 2 of p, band 3 of p, band 4 of p, band 5 of p, band 6 of p, band 7 of p, band 8 of p, band 9 of p, band 10 of p}
+        end tell
+        """
+        let descriptor = try runAppleScript(source)
+        guard descriptor.numberOfItems == 11 else { throw Failure.preset }
+        var values: [Double] = []
+        for index in 1...11 {
+            let value = descriptor.atIndex(index)?.doubleValue
+                ?? Double(descriptor.atIndex(index)?.stringValue ?? "")
+            guard let value, value.isFinite else { throw Failure.preset }
+            values.append(min(12, max(-12, value)))
+        }
+        return values
+    }
+
+    private func writeManualBands(from gains: [MixerBand: Double]) throws {
+        var bands = Array(repeating: 0.0, count: 11)
+        for band in MixerBand.allCases {
+            let value = gains[band] ?? 0
+            for number in band.bandNumbers {
+                bands[number] = value
+            }
+        }
+        try writeManualRaw(bands)
+    }
+
+    private func writeManualRaw(_ bands: [Double]) throws {
+        guard bands.count == 11 else { throw Failure.unresponsive }
+        func n(_ index: Int) -> String {
+            String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), bands[index])
+        }
+        let source = """
+        tell application "Music"
+          set p to first EQ preset whose name is "\(manualPreset)"
+          set preamp of p to \(n(0))
+          set band 1 of p to \(n(1))
+          set band 2 of p to \(n(2))
+          set band 3 of p to \(n(3))
+          set band 4 of p to \(n(4))
+          set band 5 of p to \(n(5))
+          set band 6 of p to \(n(6))
+          set band 7 of p to \(n(7))
+          set band 8 of p to \(n(8))
+          set band 9 of p to \(n(9))
+          set band 10 of p to \(n(10))
+        end tell
+        """
+        _ = try runAppleScript(source)
+    }
+
+    /// Make sure EQ is On and Manual is the active preset. Band values themselves
+    /// are already on Manual via AppleScript; this only wires playback to them.
+    private func ensureManualEQEnabled() async throws {
+        // Fast path: already On + Manual — no window needed.
+        if appleScriptBool("""
+            tell application "Music"
+              try
+                if EQ enabled is false then return false
+                try
+                  return (name of current EQ preset is "\(manualPreset)")
+                on error
+                  return false
+                end try
+              on error
+                return false
+              end try
+            end tell
+            """) == true {
+            return
+        }
+
+        // Show / open EQ window just long enough for AX enable + Manual select.
+        revealEqualizerWindow()
+        let controls = try await openControlsIfNeeded()
+        try setEnabled(true, on: controls.toggle)
+        do {
+            try await selectPresetViaPopup(manualPreset, popup: try findControls().popup)
+        } catch {
+            // Popup can flake; Manual bands are still written — leave EQ On.
+        }
+        // Prefer hiding (keeps the EQ window object alive) over destroying it.
+        hideEqualizerWindow()
+        parkEqualizerWindows()
+    }
+
+    private func revealEqualizerWindow() {
+        _ = try? runAppleScript("""
+        tell application "Music"
+          try
+            if (count of EQ windows) > 0 then
+              set visible of EQ window 1 to true
+            end if
+          end try
+        end tell
+        """)
+    }
+
+    private func hideEqualizerWindow() {
+        _ = try? runAppleScript("""
+        tell application "Music"
+          try
+            repeat with w in EQ windows
+              set visible of w to false
+            end repeat
+          end try
+        end tell
+        """)
+    }
+
+    // MARK: - AX helpers (enable / open only)
 
     private func setEnabled(_ enabled: Bool, on toggle: AXUIElement) throws {
         let target = enabled ? 1.0 : 0.0
@@ -185,26 +306,24 @@ actor MusicEqualizer {
 
     private func openControlsIfNeeded() async throws -> Controls {
         do {
-            let controls = try findControls()
-            parkEqualizerWindows()
-            return controls
+            return try findControls()
         } catch Failure.closed {
+            revealEqualizerWindow()
+            if let controls = try await waitForControls(attempts: 4) {
+                return controls
+            }
             let pressed = try openFromMenu()
-            if pressed, let controls = try await waitForControls(attempts: 5) {
-                parkEqualizerWindows()
+            if pressed, let controls = try await waitForControls(attempts: 6) {
                 return controls
             }
             try openWithShortcut()
-            if let controls = try await waitForControls(attempts: 8) {
-                parkEqualizerWindows()
+            if let controls = try await waitForControls(attempts: 10) {
                 return controls
             }
             throw Failure.closed
         }
     }
 
-    /// Keep Music’s native Equalizer window off-screen so Isla is the only visible EQ UI.
-    /// EQ On / preset state persists while the window is hidden or closed.
     private func parkEqualizerWindows() {
         guard let app = try? musicApplication() else { return }
         for window in elements(app, kAXWindowsAttribute) where isEqualizerWindow(window) {
@@ -261,13 +380,11 @@ actor MusicEqualizer {
 
     private func waitForControls(attempts: Int) async throws -> Controls? {
         for _ in 0..<attempts {
-            try await Task.sleep(for: .milliseconds(80))
+            try await Task.sleep(for: .milliseconds(90))
             do {
-                let controls = try findControls()
-                parkEqualizerWindows()
-                return controls
+                return try findControls()
             } catch Failure.closed {
-                parkEqualizerWindows()
+                revealEqualizerWindow()
                 continue
             }
         }
@@ -320,10 +437,6 @@ actor MusicEqualizer {
             throw Failure.preset
         }
         try await Task.sleep(for: .milliseconds(80))
-        if let title = popupTitle(popup), title.caseInsensitiveCompare(name) != .orderedSame {
-            // Some builds keep the previous title briefly; band fallback still available to caller.
-            throw Failure.preset
-        }
     }
 
     private func findMenuItem(named name: String, under root: AXUIElement) -> AXUIElement? {
@@ -346,39 +459,41 @@ actor MusicEqualizer {
         return nil
     }
 
-    /// Fallback: push factory preset band values onto the open EQ window (leaves EQ On).
-    private func applyPresetBands(_ name: String) throws {
-        let escaped = name.replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        let source = """
-        tell application "Music"
-          set p to first EQ preset whose name is "\(escaped)"
-          return {preamp of p, band 1 of p, band 2 of p, band 3 of p, band 4 of p, band 5 of p, band 6 of p, band 7 of p, band 8 of p, band 9 of p, band 10 of p}
-        end tell
-        """
+    // MARK: - AppleScript plumbing
+
+    private func runAppleScript(_ source: String) throws -> NSAppleEventDescriptor {
         var error: NSDictionary?
-        guard let descriptor = NSAppleScript(source: source)?.executeAndReturnError(&error),
-              descriptor.numberOfItems == 11 else {
-            throw Failure.preset
+        guard let descriptor = NSAppleScript(source: source)?.executeAndReturnError(&error) else {
+            if (error?[NSAppleScript.errorNumber] as? Int) == -1743 { throw Failure.access }
+            throw Failure.unresponsive
         }
-        var decibels: [Double] = []
-        for index in 1...11 {
-            let value = descriptor.atIndex(index)?.doubleValue
-                ?? Double(descriptor.atIndex(index)?.stringValue ?? "")
-            guard let value, value.isFinite else { throw Failure.preset }
-            decibels.append(value)
+        if let code = error?[NSAppleScript.errorNumber] as? Int, code != 0 {
+            if code == -1743 { throw Failure.access }
+            throw Failure.unresponsive
         }
-        let live = try findControls()
-        try setEnabled(true, on: live.toggle)
-        let controls = try findControls()
-        for (index, db) in decibels.enumerated() {
-            let clamped = min(12, max(-12, db))
-            let native = controls.scale.nativeValue(clamped)
-            guard AXUIElementSetAttributeValue(controls.sliders[index], kAXValueAttribute as CFString,
-                                               NSNumber(value: native)) == .success else {
-                throw Failure.unresponsive
-            }
+        return descriptor
+    }
+
+    private func appleScriptString(_ source: String) throws -> String {
+        let descriptor = try runAppleScript(source)
+        return descriptor.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private func appleScriptBool(_ source: String) -> Bool? {
+        guard let descriptor = try? runAppleScript(source) else { return nil }
+        if descriptor.descriptorType == typeBoolean || descriptor.descriptorType == typeTrue || descriptor.descriptorType == typeFalse {
+            return descriptor.booleanValue
         }
+        if let text = descriptor.stringValue?.lowercased() {
+            if text == "true" || text == "yes" { return true }
+            if text == "false" || text == "no" { return false }
+        }
+        return nil
+    }
+
+    private func escapeAppleScript(_ value: String) -> String {
+        value.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
     private func musicApplication() throws -> AXUIElement {

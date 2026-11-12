@@ -132,7 +132,7 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
  set total to count of tracks of pl
  if total is 0 then return {name of pl}
  set limit to total
- if limit > 40 then set limit to 40
+ if limit > 120 then set limit to 120
  set rows to {name of pl}
  repeat with i from 1 to limit
   set t to track i of pl
@@ -288,13 +288,7 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
   play t
   return targetID
  on error
-  try
-   set t to first track whose persistent ID is targetID
-   play t
-   return targetID
-  on error
-   return {}
-  end try
+  return {}
  end try
  end tell
  """
