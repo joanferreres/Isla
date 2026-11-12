@@ -1,8 +1,8 @@
 import SwiftUI
 import IslandCore
 
-/// Half-clipped rotary disc selector on the window’s leading edge — no boxed panel.
-/// Spins a **stable ordered** playlist ring; hover fans discs out; click a disc to play.
+/// Half-clipped rotary disc selector — physical CD-changer feel.
+/// Rest: tight stack. Hover: wide fan with depth. Click a disc to play.
 struct RecordDiscChanger: View {
     let palette: RecordPlayerPalette
     let reduceMotion: Bool
@@ -25,18 +25,19 @@ struct RecordDiscChanger: View {
     @State private var samples: [(Date, Double)] = []
     @State private var dragLastAngle: Double?
     @State private var snapTask: Task<Void, Never>?
-    @State private var hovering = false
+    @State private var prefetchTask: Task<Void, Never>?
+    /// 0 = stacked rest, 1 = fully fanned (hover / turning).
+    @State private var fan: CGFloat = 0
 
-    /// How many discs to either side of the front (7 total).
-    private let sideSlots = 3
-    /// Resting angular gap; hover widens this so discs spread away from the front.
-    private var slotSpacing: Double { hovering ? 42.0 : 26.0 }
-    private var radius: CGFloat { diameter * (hovering ? 0.42 : 0.32) }
-    private var discSize: CGFloat { diameter * (hovering ? 0.22 : 0.24) }
+    private let sideSlots = 4
 
     private var tracks: [MusicCassetteTrack] { catalog?.tracks ?? [] }
 
-    /// Track at +X (middle of the visible half), including mid-spin preview.
+    /// Rest vs hover: spacing and orbit interpolate so the change is obvious.
+    private var slotSpacing: Double { Double(18 + 44 * fan) } // 18° → 62°
+    private var radius: CGFloat { diameter * (0.28 + 0.20 * fan) } // 0.28 → 0.48
+    private var discSize: CGFloat { diameter * (0.26 - 0.04 * fan) }
+
     private var frontIndex: Int {
         guard !tracks.isEmpty else { return 0 }
         let count = tracks.count
@@ -91,20 +92,19 @@ struct RecordDiscChanger: View {
         .gesture(angularDrag)
         .contentShape(Path(CGRect(x: diameter * 0.5, y: 0, width: diameter * 0.5, height: diameter)))
         .onHover { inside in
-            withAnimation(reduceMotion ? nil : .snappy(duration: 0.28)) {
-                hovering = inside
-            }
+            setFan(inside || turning ? 1 : 0)
         }
-        .help(frontTrack.map { "\($0.title) — gira o haz clic en un disco para reproducir" } ?? "Cambiador de discos")
+        .help(frontTrack.map { "\($0.title) — pasa el cursor para abrir el abanico; clic para reproducir" } ?? "Cambiador de discos")
         .task(id: "\(currentTitle ?? "")|\(currentArtist ?? "")") { await reload() }
         .onDisappear {
             snapTask?.cancel()
+            prefetchTask?.cancel()
             RecordGestureClaim.selectorActive = false
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Cambiador de discos")
         .accessibilityValue(frontTrack.map(\.title) ?? "")
-        .accessibilityHint("Gira con dos dedos o haz clic en un disco para ponerlo en el tocadiscos")
+        .accessibilityHint("Pasa el cursor para desplegar; haz clic en un disco para reproducirlo")
         .accessibilityAdjustableAction { direction in
             switch direction {
             case .increment: nudgeSlots(1)
@@ -118,54 +118,87 @@ struct RecordDiscChanger: View {
     }
 
     private var ringWell: some View {
-        Circle()
-            .strokeBorder(palette.metal.opacity(hovering ? 0.28 : 0.18), lineWidth: 1)
-            .frame(width: diameter * 0.92, height: diameter * 0.92)
-            .allowsHitTesting(false)
+        ZStack {
+            Circle()
+                .strokeBorder(palette.metal.opacity(0.12 + 0.2 * fan), lineWidth: 1.2)
+            // Soft well shadow so the fan reads against the panel.
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [.black.opacity(0.35 * fan), .clear],
+                        center: .center,
+                        startRadius: diameter * 0.08,
+                        endRadius: diameter * 0.48
+                    )
+                )
+        }
+        .frame(width: diameter * 0.94, height: diameter * 0.94)
+        .allowsHitTesting(false)
     }
 
-    /// Short evenly spaced arc — fans out on hover; each disc is tappable.
     private var carousel: some View {
         let count = tracks.count
         let spacing = slotSpacing
         let orbit = radius
+        let size = discSize
         return ZStack {
             ForEach(visibleEntries(count: count), id: \.index) { entry in
                 let degrees = entry.delta * spacing
                 let theta = degrees * .pi / 180
+                // Perspective: front faces you; neighbours yaw away and shrink.
                 let depth = cos(theta)
-                let atFront = abs(entry.delta) < 0.5
+                let atFront = abs(entry.delta) < 0.45
+                let yaw = degrees * (0.55 + 0.35 * Double(fan)) // stronger tilt when fanned
+                let scale = atFront
+                    ? 1.0 + 0.12 * fan
+                    : max(0.55, 0.72 + 0.28 * depth)
+                let lift = CGFloat(-abs(entry.delta)) * diameter * 0.01 * fan
                 Button {
                     play(entry.track, selecting: entry.index)
                 } label: {
                     ChangerDisc(
                         artwork: artworks[entry.track.id],
                         palette: palette,
-                        emphasized: atFront || hovering
+                        emphasized: atFront,
+                        fanned: fan > 0.4
                     )
-                    .frame(width: discSize, height: discSize)
-                    .opacity(0.35 + 0.65 * max(0.2, depth))
-                    .scaleEffect(atFront ? 1.08 : max(0.8, 0.9 + 0.1 * depth))
+                    .frame(width: size, height: size)
+                    .rotation3DEffect(
+                        .degrees(yaw),
+                        axis: (x: 0, y: 1, z: 0),
+                        anchor: .center,
+                        anchorZ: 0,
+                        perspective: 0.55
+                    )
+                    .scaleEffect(scale)
+                    .opacity(0.4 + 0.6 * max(0.15, depth))
+                    .shadow(
+                        color: .black.opacity(0.25 + 0.45 * fan * max(0, depth)),
+                        radius: 4 + 10 * fan,
+                        x: CGFloat(sin(theta)) * 4 * fan,
+                        y: 6 + 8 * fan
+                    )
                 }
                 .buttonStyle(.plain)
                 .disabled(busy)
-                .offset(x: orbit * cos(theta), y: orbit * sin(theta))
-                .zIndex(50 + depth * 10)
+                .offset(
+                    x: orbit * cos(theta),
+                    y: orbit * sin(theta) + lift
+                )
+                .zIndex(100 + depth * 40 - abs(entry.delta))
                 .accessibilityLabel(entry.track.title)
                 .accessibilityHint("Reproduce en el tocadiscos")
             }
         }
         .frame(width: diameter, height: diameter)
-        .animation(reduceMotion ? nil : .snappy(duration: 0.28), value: hovering)
     }
 
     private var selectionTitle: some View {
         Group {
             if let frontTrack, !loading {
-                // Green-mark spot (~−60°), then ~1.5 finger-widths further right (scales with diameter).
                 let angle = -60.0 * .pi / 180
-                let orbit = diameter * 0.52 // ring well radius ≈ 0.46·diameter; sit just outside
-                let furtherRight = diameter * 0.18 // ≈1.5cm at typical selector size; not fixed px
+                let orbit = diameter * 0.52
+                let furtherRight = diameter * 0.18
                 VStack(alignment: .leading, spacing: 2) {
                     Text(frontTrack.title)
                         .font(.caption2.weight(.semibold))
@@ -190,7 +223,16 @@ struct RecordDiscChanger: View {
         }
     }
 
+    private func setFan(_ target: CGFloat) {
+        let value = min(1, max(0, target))
+        guard abs(fan - value) > 0.01 else { return }
+        withAnimation(reduceMotion ? nil : .interpolatingSpring(stiffness: 220, damping: 22)) {
+            fan = value
+        }
+    }
+
     private func play(_ track: MusicCassetteTrack, selecting index: Int? = nil) {
+        setFan(1)
         if let index {
             snapTask?.cancel()
             withAnimation(reduceMotion ? nil : .snappy(duration: 0.22)) {
@@ -218,7 +260,6 @@ struct RecordDiscChanger: View {
     private func visibleEntries(count: Int) -> [VisibleEntry] {
         guard count > 0 else { return [] }
         var entries: [VisibleEntry] = []
-        // Unique playlist indices near the cursor (handles wrap + duplicates by index).
         var seen = Set<Int>()
         let span = min(sideSlots, max(count / 2, 0))
         for step in -span...span {
@@ -228,7 +269,6 @@ struct RecordDiscChanger: View {
             guard abs(delta) <= Double(sideSlots) + 0.6 else { continue }
             entries.append(VisibleEntry(index: index, delta: delta, track: tracks[index]))
         }
-        // Mid-spin: also keep nearest indices by continuous delta so motion stays smooth.
         if entries.count < min(count, sideSlots * 2 + 1) {
             for index in 0..<count where !seen.contains(index) {
                 let delta = shortestIndexDelta(Double(index) - cursor, count: count)
@@ -275,6 +315,7 @@ struct RecordDiscChanger: View {
     private func beginTurn() {
         snapTask?.cancel()
         snapTask = nil
+        setFan(1)
         if !turning {
             turning = true
             RecordGestureClaim.selectorActive = true
@@ -289,7 +330,7 @@ struct RecordDiscChanger: View {
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            cursor += degrees / slotSpacing
+            cursor += degrees / max(slotSpacing, 1)
         }
         samples.append((Date(), cursor))
         if samples.count > 12 { samples.removeFirst(samples.count - 12) }
@@ -317,6 +358,7 @@ struct RecordDiscChanger: View {
         withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) {
             cursor = turnOrigin
         }
+        setFan(0)
     }
 
     private func commitFrontSelection(animated: Bool) {
@@ -342,7 +384,6 @@ struct RecordDiscChanger: View {
         RecordGestureClaim.selectorActive = false
         samples = []
         dragLastAngle = nil
-        Task { await prefetch(around: next) }
     }
 
     private func angularVelocity() -> Double {
@@ -376,7 +417,8 @@ struct RecordDiscChanger: View {
             }
             turning = false
             RecordGestureClaim.selectorActive = false
-            await prefetch(around: Int(cursor.rounded()))
+            // Eagerly warm every cover so the fan never shows blank vinyl.
+            prefetchAllCovers()
         } catch {
             catalog = nil
             self.error = error.localizedDescription
@@ -386,23 +428,43 @@ struct RecordDiscChanger: View {
     private func nudgeSlots(_ delta: Int) {
         guard !tracks.isEmpty, delta != 0 else { return }
         snapTask?.cancel()
+        setFan(1)
         let count = tracks.count
         let next = ((Int(cursor.rounded()) + delta) % count + count) % count
         withAnimation(reduceMotion ? nil : .snappy(duration: 0.28)) {
             cursor = Double(next)
         }
-        Task { await prefetch(around: next) }
     }
 
-    private func prefetch(around index: Int) async {
-        guard !tracks.isEmpty else { return }
-        let count = tracks.count
-        for offset in -sideSlots...sideSlots {
-            let track = tracks[((index + offset) % count + count) % count]
-            guard artworks[track.id] == nil else { continue }
-            if let data = try? await service.artwork(trackID: track.id),
-               let image = NSImage(data: data) {
-                artworks[track.id] = image
+    /// Fetch artwork for the entire changer catalog (bounded concurrency).
+    private func prefetchAllCovers() {
+        prefetchTask?.cancel()
+        let pending = tracks.filter { artworks[$0.id] == nil }
+        guard !pending.isEmpty else { return }
+        let service = service
+        prefetchTask = Task { @MainActor in
+            await withTaskGroup(of: (String, NSImage?).self) { group in
+                var iterator = pending.makeIterator()
+                let workers = min(6, pending.count)
+                for _ in 0..<workers {
+                    guard let track = iterator.next() else { break }
+                    let trackID = track.id
+                    group.addTask {
+                        let data = try? await service.artwork(trackID: trackID)
+                        return (trackID, data.flatMap(NSImage.init(data:)))
+                    }
+                }
+                while let (id, image) = await group.next() {
+                    if Task.isCancelled { break }
+                    if let image { artworks[id] = image }
+                    if let track = iterator.next() {
+                        let trackID = track.id
+                        group.addTask {
+                            let data = try? await service.artwork(trackID: trackID)
+                            return (trackID, data.flatMap(NSImage.init(data:)))
+                        }
+                    }
+                }
             }
         }
     }
@@ -412,37 +474,62 @@ private struct ChangerDisc: View {
     let artwork: NSImage?
     let palette: RecordPlayerPalette
     let emphasized: Bool
+    var fanned: Bool = false
 
     var body: some View {
         ZStack {
+            // Disc edge / thickness hint.
+            Circle()
+                .fill(Color(white: 0.02))
+                .offset(x: fanned ? 2.5 : 1, y: fanned ? 2 : 1)
             Circle()
                 .fill(Color(white: 0.07))
-                .shadow(color: .black.opacity(emphasized ? 0.5 : 0.2), radius: emphasized ? 7 : 3, y: 2)
             if let artwork {
                 Image(nsImage: artwork)
                     .resizable()
                     .scaledToFill()
             } else {
-                // Quiet vinyl blank — never a bright “ghost” placeholder.
                 Circle()
                     .fill(
                         RadialGradient(
-                            colors: [Color(white: 0.16), Color(white: 0.05)],
+                            colors: [Color(white: 0.18), Color(white: 0.05)],
                             center: .center,
                             startRadius: 2,
-                            endRadius: 40
+                            endRadius: 48
                         )
                     )
             }
+            // Vinyl sheen.
+            Circle()
+                .fill(
+                    AngularGradient(
+                        colors: [
+                            .white.opacity(0.0),
+                            .white.opacity(emphasized ? 0.18 : 0.06),
+                            .white.opacity(0.0),
+                            .white.opacity(emphasized ? 0.1 : 0.03),
+                            .white.opacity(0.0),
+                        ],
+                        center: .center
+                    )
+                )
+                .blendMode(.screen)
+            Circle()
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [.white.opacity(emphasized ? 0.55 : 0.22), .white.opacity(0.05)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: emphasized ? 1.6 : 0.8
+                )
+            // Spindle hole.
+            Circle()
+                .fill(.black)
+                .frame(width: emphasized ? 11 : 9, height: emphasized ? 11 : 9)
+                .overlay(Circle().strokeBorder(.white.opacity(0.35), lineWidth: 0.7))
         }
         .clipShape(Circle())
-        .overlay {
-            Circle().strokeBorder(.white.opacity(emphasized ? 0.35 : 0.1), lineWidth: emphasized ? 1.3 : 0.7)
-        }
-        .overlay {
-            Circle().fill(.black).frame(width: 8, height: 8)
-                .overlay(Circle().strokeBorder(.white.opacity(0.3), lineWidth: 0.6))
-        }
     }
 }
 
@@ -522,7 +609,6 @@ private struct ChangerTurnSurface: NSViewRepresentable {
                 DispatchQueue.main.async { self.onFinish?(true) }
                 return nil
             }
-            // Match inverted scroll so rotate gestures share the same sense of spin.
             let degrees = -Double(event.rotation)
             if degrees != 0 {
                 DispatchQueue.main.async { self.onTorque?(degrees) }
@@ -551,7 +637,6 @@ private struct ChangerTurnSurface: NSViewRepresentable {
                 DispatchQueue.main.async { self.onFinish?(true) }
                 return nil
             }
-            // Natural trackpad scroll felt inverted on the half-ring — flip torque sign.
             let direction: CGFloat = event.isDirectionInvertedFromDevice ? -1 : 1
             let dx = direction * event.scrollingDeltaX
             let dy = direction * event.scrollingDeltaY
