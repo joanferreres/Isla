@@ -1,8 +1,8 @@
 import SwiftUI
 import IslandCore
 
-/// Half-clipped rotary disc selector — physical CD-changer feel.
-/// Rest: tight stack. Hover: wide fan with depth. Click a disc to play.
+/// Half-clipped rotary disc selector — discs stay **flat / facing the camera**.
+/// Rest: compact arc. Hover: wider fan (scale/spacing only, no 3D yaw). Click to play.
 struct RecordDiscChanger: View {
     let palette: RecordPlayerPalette
     let reduceMotion: Bool
@@ -33,10 +33,10 @@ struct RecordDiscChanger: View {
 
     private var tracks: [MusicCassetteTrack] { catalog?.tracks ?? [] }
 
-    /// Rest vs hover: spacing and orbit interpolate so the change is obvious.
-    private var slotSpacing: Double { Double(18 + 44 * fan) } // 18° → 62°
-    private var radius: CGFloat { diameter * (0.28 + 0.20 * fan) } // 0.28 → 0.48
-    private var discSize: CGFloat { diameter * (0.26 - 0.04 * fan) }
+    /// Rest vs hover: spacing and orbit only — discs never tip edge-on.
+    private var slotSpacing: Double { Double(24 + 28 * fan) } // 24° → 52°
+    private var radius: CGFloat { diameter * (0.32 + 0.12 * fan) } // 0.32 → 0.44
+    private var discSize: CGFloat { diameter * 0.24 }
 
     private var frontIndex: Int {
         guard !tracks.isEmpty else { return 0 }
@@ -145,52 +145,37 @@ struct RecordDiscChanger: View {
             ForEach(visibleEntries(count: count), id: \.index) { entry in
                 let degrees = entry.delta * spacing
                 let theta = degrees * .pi / 180
-                // Perspective: front faces you; neighbours yaw away and shrink.
                 let depth = cos(theta)
                 let atFront = abs(entry.delta) < 0.45
-                let yaw = degrees * (0.55 + 0.35 * Double(fan)) // stronger tilt when fanned
-                let scale = atFront
-                    ? 1.0 + 0.12 * fan
-                    : max(0.55, 0.72 + 0.28 * depth)
-                let lift = CGFloat(-abs(entry.delta)) * diameter * 0.01 * fan
+                // Flat to camera — only mild scale/opacity for depth, never rotation3D yaw.
+                let scale = atFront ? 1.06 : max(0.82, 0.9 + 0.1 * depth)
                 Button {
                     play(entry.track, selecting: entry.index)
                 } label: {
                     ChangerDisc(
                         artwork: artworks[entry.track.id],
                         palette: palette,
-                        emphasized: atFront,
-                        fanned: fan > 0.4
+                        emphasized: atFront
                     )
                     .frame(width: size, height: size)
-                    .rotation3DEffect(
-                        .degrees(yaw),
-                        axis: (x: 0, y: 1, z: 0),
-                        anchor: .center,
-                        anchorZ: 0,
-                        perspective: 0.55
-                    )
                     .scaleEffect(scale)
-                    .opacity(0.4 + 0.6 * max(0.15, depth))
+                    .opacity(0.4 + 0.6 * max(0.2, depth))
                     .shadow(
-                        color: .black.opacity(0.25 + 0.45 * fan * max(0, depth)),
-                        radius: 4 + 10 * fan,
-                        x: CGFloat(sin(theta)) * 4 * fan,
-                        y: 6 + 8 * fan
+                        color: .black.opacity(atFront ? 0.45 : 0.2),
+                        radius: atFront ? 8 : 3,
+                        y: atFront ? 4 : 2
                     )
                 }
                 .buttonStyle(.plain)
                 .disabled(busy)
-                .offset(
-                    x: orbit * cos(theta),
-                    y: orbit * sin(theta) + lift
-                )
+                .offset(x: orbit * cos(theta), y: orbit * sin(theta))
                 .zIndex(100 + depth * 40 - abs(entry.delta))
                 .accessibilityLabel(entry.track.title)
                 .accessibilityHint("Reproduce en el tocadiscos")
             }
         }
         .frame(width: diameter, height: diameter)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.28), value: fan)
     }
 
     private var selectionTitle: some View {
@@ -474,16 +459,10 @@ private struct ChangerDisc: View {
     let artwork: NSImage?
     let palette: RecordPlayerPalette
     let emphasized: Bool
-    var fanned: Bool = false
 
     var body: some View {
         ZStack {
-            // Disc edge / thickness hint.
-            Circle()
-                .fill(Color(white: 0.02))
-                .offset(x: fanned ? 2.5 : 1, y: fanned ? 2 : 1)
-            Circle()
-                .fill(Color(white: 0.07))
+            Circle().fill(Color(white: 0.07))
             if let artwork {
                 Image(nsImage: artwork)
                     .resizable()
@@ -492,42 +471,19 @@ private struct ChangerDisc: View {
                 Circle()
                     .fill(
                         RadialGradient(
-                            colors: [Color(white: 0.18), Color(white: 0.05)],
+                            colors: [Color(white: 0.16), Color(white: 0.05)],
                             center: .center,
                             startRadius: 2,
-                            endRadius: 48
+                            endRadius: 40
                         )
                     )
             }
-            // Vinyl sheen.
             Circle()
-                .fill(
-                    AngularGradient(
-                        colors: [
-                            .white.opacity(0.0),
-                            .white.opacity(emphasized ? 0.18 : 0.06),
-                            .white.opacity(0.0),
-                            .white.opacity(emphasized ? 0.1 : 0.03),
-                            .white.opacity(0.0),
-                        ],
-                        center: .center
-                    )
-                )
-                .blendMode(.screen)
-            Circle()
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [.white.opacity(emphasized ? 0.55 : 0.22), .white.opacity(0.05)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: emphasized ? 1.6 : 0.8
-                )
-            // Spindle hole.
+                .strokeBorder(.white.opacity(emphasized ? 0.35 : 0.12), lineWidth: emphasized ? 1.3 : 0.7)
             Circle()
                 .fill(.black)
-                .frame(width: emphasized ? 11 : 9, height: emphasized ? 11 : 9)
-                .overlay(Circle().strokeBorder(.white.opacity(0.35), lineWidth: 0.7))
+                .frame(width: 8, height: 8)
+                .overlay(Circle().strokeBorder(.white.opacity(0.3), lineWidth: 0.6))
         }
         .clipShape(Circle())
     }
