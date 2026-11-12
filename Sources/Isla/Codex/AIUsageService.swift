@@ -4,12 +4,19 @@ import SQLite3
 import Security
 import LocalAuthentication
 
+/// Auth for Anthropic Messages / usage: Claude Code OAuth, or an Isla-stored / env API key.
+enum ClaudeAPIAuth:Sendable {
+ case oauth(token:String)
+ case apiKey(String)
+}
+
 actor AICredentialReader {
  private var cachedClaude:Data?
  private var cachedUntil=Date.distantPast
  private var cachedCursorToken:String?
  private var cachedCursorSealed:String?
  private let savedService="local.personal.isla.claude-session"
+ private let apiKeyService="local.personal.isla.anthropic-api-key"
  private func silentKeychain(_ query:[CFString:Any]) -> (OSStatus,CFTypeRef?) {
   var allowed:DarwinBoolean=true;SecKeychainGetUserInteractionAllowed(&allowed);SecKeychainSetUserInteractionAllowed(false)
   defer { SecKeychainSetUserInteractionAllowed(allowed.boolValue) }
@@ -138,6 +145,67 @@ actor AICredentialReader {
   throw MusicFailure(message:interactive
    ? "No se pudo leer la sesión de Claude Code. Inicia sesión con «claude auth login» y vuelve a permitir el acceso al llavero."
    : "No se pudo leer la sesión de Claude Code. Pulsa «Permitir acceso a Claude» o inicia sesión con «claude auth login».")
+ }
+
+ /// Credential for calling Anthropic Messages (auto-EQ, etc.).
+ /// Order: Claude Code OAuth (same as Isla IA) → keychain API key → `ANTHROPIC_API_KEY`.
+ func claudeAPIAuth(interactive:Bool=false,home:URL=FileManager.default.homeDirectoryForCurrentUser) throws -> ClaudeAPIAuth {
+  if let oauth=try? claudeOAuthToken(interactive:interactive,home:home) {
+   return .oauth(token:oauth)
+  }
+  if let key=storedAPIKey(),!key.isEmpty { return .apiKey(key) }
+  if let key=ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]?
+   .trimmingCharacters(in:.whitespacesAndNewlines),!key.isEmpty {
+   return .apiKey(key)
+  }
+  throw MusicFailure(message:"""
+  Auto-EQ con Claude necesita autenticación.
+  1) Preferido: «claude auth login» (Claude Code) y permitir el llavero en Isla → IA → Claude.
+  2) O pega una API key de Anthropic en Ajustes → Música → Auto-EQ.
+  3) O exporta ANTHROPIC_API_KEY en el entorno al lanzar Isla.
+  """)
+ }
+
+ func hasStoredAnthropicAPIKey() -> Bool { storedAPIKey()?.isEmpty == false }
+
+ func saveAnthropicAPIKey(_ key:String) throws {
+  let trimmed=key.trimmingCharacters(in:.whitespacesAndNewlines)
+  guard trimmed.hasPrefix("sk-ant-"),trimmed.count>20 else {
+   throw MusicFailure(message:"La API key de Anthropic debe empezar por sk-ant-.")
+  }
+  let query:[CFString:Any]=[kSecClass:kSecClassGenericPassword,kSecAttrService:apiKeyService,kSecAttrAccount:"api-key"]
+  var allowed:DarwinBoolean=true;SecKeychainGetUserInteractionAllowed(&allowed);SecKeychainSetUserInteractionAllowed(false)
+  defer { SecKeychainSetUserInteractionAllowed(allowed.boolValue) }
+  let data=Data(trimmed.utf8)
+  if SecItemUpdate(query as CFDictionary,[kSecValueData:data] as CFDictionary) == errSecItemNotFound {
+   var add=query;add[kSecValueData]=data;add[kSecAttrAccessible]=kSecAttrAccessibleAfterFirstUnlock
+   let status=SecItemAdd(add as CFDictionary,nil)
+   guard status == errSecSuccess || status == errSecDuplicateItem else {
+    throw MusicFailure(message:"No se pudo guardar la API key en el llavero.")
+   }
+  }
+ }
+
+ func clearAnthropicAPIKey() {
+  var allowed:DarwinBoolean=true;SecKeychainGetUserInteractionAllowed(&allowed);SecKeychainSetUserInteractionAllowed(false)
+  defer { SecKeychainSetUserInteractionAllowed(allowed.boolValue) }
+  SecItemDelete([kSecClass:kSecClassGenericPassword,kSecAttrService:apiKeyService,kSecAttrAccount:"api-key"] as CFDictionary)
+ }
+
+ private func storedAPIKey() -> String? {
+  let (status,result)=silentKeychain([kSecClass:kSecClassGenericPassword,kSecAttrService:apiKeyService,kSecAttrAccount:"api-key",kSecReturnData:true,kSecMatchLimit:kSecMatchLimitOne])
+  guard status == errSecSuccess,let data=result as? Data,let key=String(data:data,encoding:.utf8) else { return nil }
+  let trimmed=key.trimmingCharacters(in:.whitespacesAndNewlines)
+  return trimmed.isEmpty ? nil : trimmed
+ }
+
+ private func claudeOAuthToken(interactive:Bool,home:URL) throws -> String {
+  let request=try request(.claude,interactive:interactive,home:home)
+  guard let auth=request.value(forHTTPHeaderField:"Authorization"),
+        auth.hasPrefix("Bearer ") else {
+   throw MusicFailure(message:"Sesión de Claude Code incompleta.")
+  }
+  return String(auth.dropFirst("Bearer ".count))
  }
 }
 @MainActor final class AIUsageService:ObservableObject {

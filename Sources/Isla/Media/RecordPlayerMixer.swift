@@ -1,12 +1,15 @@
 import SwiftUI
+import IslandCore
 
 struct RecordPlayerMixer: View {
     let music: AppleMusicService
+    @ObservedObject var preferences: PreferencesStore
     let palette: RecordPlayerPalette
     let active: Bool
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var equalizer = MusicEqualizer()
+    @State private var claudeEQ = MusicClaudeEQService()
     @State private var gains: [MixerBand: Double] = [:]
     @State private var eqFailure: MusicEqualizer.Failure?
     @State private var changingEQ = false
@@ -19,6 +22,8 @@ struct RecordPlayerMixer: View {
     @State private var volumeError: String?
     @State private var presets: [String] = []
     @State private var selectedPreset: String?
+    @State private var claudeStatus: String?
+    @State private var lastClaudeTrackID: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -39,12 +44,18 @@ struct RecordPlayerMixer: View {
                 volumeFader
             }
             .fixedSize(horizontal: false, vertical: true)
+            if let claudeStatus, preferences.value.musicClaudeEQEnabled {
+                Text(claudeStatus)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
             if let volumeError {
                 Text(volumeError).font(.caption2).foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 10)
-        .help(eqFailure?.localizedDescription ?? "")
+        .help(eqFailure?.localizedDescription ?? claudeStatus ?? "")
         .alert("Controlar el ecualizador de Música", isPresented: $showAccess) {
             Button("Abrir Accesibilidad") {
                 if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
@@ -85,6 +96,15 @@ struct RecordPlayerMixer: View {
             }
             if !Task.isCancelled { volumeRequest = nil }
         }
+        .task(id: autoEQTaskID) {
+            await applyClaudeEQIfNeeded()
+        }
+    }
+
+    private var autoEQTaskID: String {
+        let track = music.state.snapshot?.trackID ?? ""
+        let enabled = preferences.value.musicClaudeEQEnabled && active && music.enabled
+        return "\(enabled)|\(track)"
     }
 
     @ViewBuilder private var presetMenu: some View {
@@ -286,6 +306,61 @@ struct RecordPlayerMixer: View {
                     }
                 }
             }
+        }
+    }
+
+    private func applyClaudeEQIfNeeded() async {
+        guard preferences.value.musicClaudeEQEnabled, active, music.enabled else {
+            claudeStatus = nil
+            return
+        }
+        guard let snapshot = music.state.snapshot, !snapshot.title.isEmpty else { return }
+        if snapshot.trackID == lastClaudeTrackID { return }
+        try? await Task.sleep(for: .milliseconds(450))
+        guard !Task.isCancelled else { return }
+        guard preferences.value.musicClaudeEQEnabled, active else { return }
+        guard music.state.snapshot?.trackID == snapshot.trackID else { return }
+        if presets.isEmpty { await loadPresets() }
+        claudeStatus = "Claude EQ…"
+        do {
+            let advice = try await claudeEQ.advise(
+                title: snapshot.title,
+                artist: snapshot.artist,
+                presets: presets,
+                interactiveAuth: false
+            )
+            guard !Task.isCancelled, music.state.snapshot?.trackID == snapshot.trackID else { return }
+            if let preset = advice.preset {
+                applyEQ(preview: [
+                    .bass: advice.bass, .mid: advice.mid, .treble: advice.treble
+                ]) {
+                    let result = try await equalizer.selectPreset(preset)
+                    selectedPreset = preset
+                    return result
+                }
+                claudeStatus = "\(advice.genre) · \(preset)"
+            } else {
+                let target: [MixerBand: Double] = [
+                    .bass: advice.bass, .mid: advice.mid, .treble: advice.treble
+                ]
+                applyEQ(preview: target) {
+                    let result = try await equalizer.setAll(target)
+                    selectedPreset = "Manual"
+                    return result
+                }
+                claudeStatus = "\(advice.genre) · Manual"
+            }
+            lastClaudeTrackID = snapshot.trackID
+        } catch let failure as MusicClaudeEQService.Failure {
+            guard !Task.isCancelled else { return }
+            claudeStatus = failure.localizedDescription
+            // Auth can be fixed mid-session — allow retry on the same track.
+            if case .auth = failure { return }
+            lastClaudeTrackID = snapshot.trackID
+        } catch {
+            guard !Task.isCancelled else { return }
+            claudeStatus = error.localizedDescription
+            lastClaudeTrackID = snapshot.trackID
         }
     }
 }

@@ -84,6 +84,10 @@ private enum SettingsPage:String,CaseIterable,Identifiable {
  Toggle("Conectar Apple Music",isOn:$store.value.musicEnabled)
  Text("Carátula, canción actual y controles de reproducción.").font(.caption).foregroundStyle(.secondary)
  if let error=music.error { Text(error).font(.caption).foregroundStyle(.orange) }
+ Toggle("Auto-EQ con Claude",isOn:$store.value.musicClaudeEQEnabled)
+  .disabled(!store.value.musicEnabled)
+ Text("Al cambiar de canción, Claude estima el género y aplica un preset o Graves/Medios/Agudos. Desactívalo aquí para optar por no usarlo.").font(.caption).foregroundStyle(.secondary)
+ ClaudeEQAPIKeySetup()
  } header: { Label("Música",systemImage:"music.note") }
  Section {
  Toggle("Conectar Calendario",isOn:$store.value.calendarEnabled)
@@ -173,5 +177,60 @@ private enum SettingsPage:String,CaseIterable,Identifiable {
  store.value.selectedCalendarIDs=ids.isEmpty ? ["__none__"] : ids
  calendar.refresh()
  })
+ }
+}
+
+/// Optional Anthropic API key when Claude Code OAuth is not available.
+private struct ClaudeEQAPIKeySetup: View {
+ @State private var advisor = MusicClaudeEQService()
+ @State private var hasKey = false
+ @State private var draft = ""
+ @State private var status: String?
+ @State private var busy = false
+
+ var body: some View {
+ VStack(alignment: .leading, spacing: 6) {
+ Text(hasKey
+  ? "API key de Anthropic guardada en el llavero (fallback si no hay sesión Claude Code)."
+  : "Sin API key guardada. Isla reutiliza la sesión OAuth de Claude Code si existe.")
+  .font(.caption)
+  .foregroundStyle(.secondary)
+ SecureField("sk-ant-… (opcional)", text: $draft)
+  .textFieldStyle(.roundedBorder)
+  .disabled(busy)
+ HStack {
+  Button(busy ? "Guardando…" : "Guardar API key") {
+   Task {
+    busy = true
+    defer { busy = false }
+    do {
+     try await advisor.saveAPIKey(draft)
+     draft = ""
+     hasKey = true
+     status = "API key guardada."
+    } catch {
+     status = error.localizedDescription
+    }
+   }
+  }
+  .disabled(busy || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+  if hasKey {
+   Button("Borrar key", role: .destructive) {
+    Task {
+     await advisor.clearAPIKey()
+     hasKey = false
+     status = "API key eliminada."
+    }
+   }
+  }
+ }
+ if let status {
+  Text(status).font(.caption2).foregroundStyle(.secondary)
+ }
+ Text("Prioridad: OAuth Claude Code → key del llavero → variable ANTHROPIC_API_KEY.")
+  .font(.caption2)
+  .foregroundStyle(.secondary)
+ }
+ .task { hasKey = await advisor.hasAPIKey() }
  }
 }

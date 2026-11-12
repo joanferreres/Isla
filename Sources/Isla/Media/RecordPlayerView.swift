@@ -105,8 +105,12 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                             .overlay {
                                 changerHandOffOverlay(diameter: diameter)
                             }
-                        RecordPlayerMixer(music: music, palette: palette,
-                                          active: presentation.isVisible && music.enabled)
+                        RecordPlayerMixer(
+                            music: music,
+                            preferences: preferences,
+                            palette: palette,
+                            active: presentation.isVisible && music.enabled
+                        )
                             .frame(width: 220)
                     }
                     .padding(.leading, max(diameter * 0.08, selectorDiameter * 0.28))

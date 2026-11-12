@@ -141,6 +141,19 @@ actor MusicEqualizer {
         return desired
     }
 
+    /// Write Graves/Medios/Agudos in one Manual pass (used by Claude auto-EQ).
+    func setAll(_ gains: [MixerBand: Double]) async throws -> [MixerBand: Double] {
+        for band in MixerBand.allCases {
+            let value = gains[band] ?? desired[band] ?? 0
+            guard value.isFinite else { throw Failure.unresponsive }
+            desired[band] = min(12, max(-12, value)).rounded()
+        }
+        try writeManualBands(from: desired)
+        try await ensureManualEQEnabled()
+        try writeManualBands(from: desired)
+        return desired
+    }
+
     /// Activates a factory (or Manual) EQ preset by name and leaves EQ On.
     /// AppleScript cannot set `current EQ preset` on modern Music — AX popup is required.
     /// Does **not** rewrite Manual when choosing a factory preset (that was silently no-op’ing audio).
