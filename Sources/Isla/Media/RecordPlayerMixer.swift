@@ -25,6 +25,9 @@ struct RecordPlayerMixer: View {
     @State private var claudeStatus: String?
     @State private var lastClaudeTrackID: String?
 
+    /// Style entry in the EQ menu — enables Claude auto-EQ (not a Music factory preset).
+    private static let claudeStyleName = "Claude"
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
@@ -44,8 +47,8 @@ struct RecordPlayerMixer: View {
                 volumeFader
             }
             .fixedSize(horizontal: false, vertical: true)
-            if let claudeStatus, preferences.value.musicClaudeEQEnabled {
-                Text(claudeStatus)
+            if preferences.value.musicClaudeEQEnabled {
+                Text(claudeStatus ?? "Estilo Claude — EQ según el tipo de música")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -74,8 +77,18 @@ struct RecordPlayerMixer: View {
                 gains = current
                 eqFailure = nil
             }
-            if let name = try? await equalizer.currentPresetName(), !Task.isCancelled {
+            if preferences.value.musicClaudeEQEnabled {
+                selectedPreset = Self.claudeStyleName
+            } else if let name = try? await equalizer.currentPresetName(), !Task.isCancelled {
                 selectedPreset = name
+            }
+        }
+        .onChange(of: preferences.value.musicClaudeEQEnabled) { _, enabled in
+            if enabled {
+                selectedPreset = Self.claudeStyleName
+                lastClaudeTrackID = nil
+            } else if selectedPreset == Self.claudeStyleName {
+                selectedPreset = nil
             }
         }
         .task(id: volumeRequest) {
@@ -108,10 +121,14 @@ struct RecordPlayerMixer: View {
     }
 
     @ViewBuilder private var presetMenu: some View {
-        let label = selectedPreset ?? "Preset EQ"
+        let label = preferences.value.musicClaudeEQEnabled
+            ? Self.claudeStyleName
+            : (selectedPreset ?? "Estilo EQ")
         let menu = Menu {
+            Button(Self.claudeStyleName) { enableClaudeStyle() }
+            if !presets.isEmpty { Divider() }
             if presets.isEmpty {
-                Text("Sin presets").foregroundStyle(.secondary)
+                Text("Sin presets de Música").foregroundStyle(.secondary)
             } else {
                 ForEach(presets, id: \.self) { name in
                     Button(name) { applyPreset(name) }
@@ -119,7 +136,7 @@ struct RecordPlayerMixer: View {
             }
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: "slider.horizontal.3")
+                Image(systemName: preferences.value.musicClaudeEQEnabled ? "sparkles" : "slider.horizontal.3")
                 Text(label)
                     .lineLimit(1)
             }
@@ -127,9 +144,9 @@ struct RecordPlayerMixer: View {
             .frame(maxWidth: 132, alignment: .leading)
         }
         .controlSize(.small)
-        .disabled(!active || changingEQ || presets.isEmpty)
-        .accessibilityLabel("Preset del ecualizador de Música")
-        .help("Aplica un preset de fábrica del ecualizador de Música. El EQ sigue activo si cierras el panel de Isla.")
+        .disabled(!active || changingEQ)
+        .accessibilityLabel("Estilo del ecualizador")
+        .help("Elige «Claude» para auto-EQ por tipo de música, o un preset de fábrica de Música.")
         if #available(macOS 26.0, *), !reduceTransparency {
             menu.menuStyle(.borderlessButton)
         } else {
@@ -139,6 +156,7 @@ struct RecordPlayerMixer: View {
 
     @ViewBuilder private var resetButton: some View {
         let button = Button {
+            disableClaudeStyle()
             let neutral = Dictionary(uniqueKeysWithValues: MixerBand.allCases.map { ($0, 0.0) })
             applyEQ(preview: neutral) {
                 let result = try await equalizer.reset()
@@ -240,6 +258,7 @@ struct RecordPlayerMixer: View {
     }
 
     private func adjust(_ target: Double, band: MixerBand) {
+        disableClaudeStyle()
         var preview = gains
         preview[band] = min(12, max(-12, target))
         applyEQ(preview: preview) {
@@ -250,7 +269,21 @@ struct RecordPlayerMixer: View {
         }
     }
 
+    private func enableClaudeStyle() {
+        preferences.value.musicClaudeEQEnabled = true
+        selectedPreset = Self.claudeStyleName
+        lastClaudeTrackID = nil
+        claudeStatus = "Estilo Claude — EQ según el tipo de música"
+    }
+
+    private func disableClaudeStyle() {
+        guard preferences.value.musicClaudeEQEnabled else { return }
+        preferences.value.musicClaudeEQEnabled = false
+        claudeStatus = nil
+    }
+
     private func applyPreset(_ name: String) {
+        disableClaudeStyle()
         applyEQ(preview: gains) {
             let result = try await equalizer.selectPreset(name)
             selectedPreset = name
@@ -335,7 +368,8 @@ struct RecordPlayerMixer: View {
                     .bass: advice.bass, .mid: advice.mid, .treble: advice.treble
                 ]) {
                     let result = try await equalizer.selectPreset(preset)
-                    selectedPreset = preset
+                    // Keep the style menu on «Claude» while auto-EQ owns the curve.
+                    selectedPreset = Self.claudeStyleName
                     return result
                 }
                 claudeStatus = "\(advice.genre) · \(preset)"
@@ -345,10 +379,10 @@ struct RecordPlayerMixer: View {
                 ]
                 applyEQ(preview: target) {
                     let result = try await equalizer.setAll(target)
-                    selectedPreset = "Manual"
+                    selectedPreset = Self.claudeStyleName
                     return result
                 }
-                claudeStatus = "\(advice.genre) · Manual"
+                claudeStatus = "\(advice.genre) · bandas"
             }
             lastClaudeTrackID = snapshot.trackID
         } catch let failure as MusicClaudeEQService.Failure {
