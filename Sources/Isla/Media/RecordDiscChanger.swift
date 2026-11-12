@@ -142,9 +142,10 @@ struct RecordDiscChanger: View {
     private var selectionTitle: some View {
         Group {
             if let frontTrack, !loading {
-                // Green-mark spot: top-right of the ring (~−60° / 2 o’clock), outside the arc — not on the disc.
+                // Green-mark spot (~−60°), then ~1.5 finger-widths further right (scales with diameter).
                 let angle = -60.0 * .pi / 180
                 let orbit = diameter * 0.52 // ring well radius ≈ 0.46·diameter; sit just outside
+                let furtherRight = diameter * 0.18 // ≈1.5cm at typical selector size; not fixed px
                 VStack(alignment: .leading, spacing: 2) {
                     Text(frontTrack.title)
                         .font(.caption2.weight(.semibold))
@@ -160,7 +161,7 @@ struct RecordDiscChanger: View {
                 .blendMode(.difference)
                 .frame(width: max(100, diameter * 0.42), alignment: .leading)
                 .offset(
-                    x: orbit * CGFloat(cos(angle)),
+                    x: orbit * CGFloat(cos(angle)) + furtherRight,
                     y: orbit * CGFloat(sin(angle))
                 )
                 .allowsHitTesting(false)
