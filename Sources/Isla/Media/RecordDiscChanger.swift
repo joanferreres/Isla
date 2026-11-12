@@ -142,6 +142,9 @@ struct RecordDiscChanger: View {
     private var selectionTitle: some View {
         Group {
             if let frontTrack, !loading {
+                // Sit outside the front disc, ~60° toward the top (not centered on the art).
+                let lift = -60.0 * .pi / 180
+                let clear = discSize * 0.58
                 VStack(alignment: .leading, spacing: 2) {
                     Text(frontTrack.title)
                         .font(.caption2.weight(.semibold))
@@ -156,7 +159,10 @@ struct RecordDiscChanger: View {
                 .compositingGroup()
                 .blendMode(.difference)
                 .frame(width: max(96, diameter * 0.4), alignment: .leading)
-                .offset(x: radius + discSize * 0.15, y: 0)
+                .offset(
+                    x: radius + clear * CGFloat(cos(lift)),
+                    y: clear * CGFloat(sin(lift))
+                )
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
             }
