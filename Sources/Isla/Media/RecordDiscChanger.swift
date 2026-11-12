@@ -142,9 +142,9 @@ struct RecordDiscChanger: View {
     private var selectionTitle: some View {
         Group {
             if let frontTrack, !loading {
-                // Sit outside the front disc, ~60° toward the top (not centered on the art).
-                let lift = -60.0 * .pi / 180
-                let clear = discSize * 0.58
+                // Green-mark spot: top-right of the ring (~−60° / 2 o’clock), outside the arc — not on the disc.
+                let angle = -60.0 * .pi / 180
+                let orbit = diameter * 0.52 // ring well radius ≈ 0.46·diameter; sit just outside
                 VStack(alignment: .leading, spacing: 2) {
                     Text(frontTrack.title)
                         .font(.caption2.weight(.semibold))
@@ -158,10 +158,10 @@ struct RecordDiscChanger: View {
                 .foregroundStyle(.white)
                 .compositingGroup()
                 .blendMode(.difference)
-                .frame(width: max(96, diameter * 0.4), alignment: .leading)
+                .frame(width: max(100, diameter * 0.42), alignment: .leading)
                 .offset(
-                    x: radius + clear * CGFloat(cos(lift)),
-                    y: clear * CGFloat(sin(lift))
+                    x: orbit * CGFloat(cos(angle)),
+                    y: orbit * CGFloat(sin(angle))
                 )
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
