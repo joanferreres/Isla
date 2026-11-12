@@ -264,6 +264,10 @@ struct RecordPlayerMixer: View {
         let revision = eqRevision
         changingEQ = true
         Task {
+            defer {
+                // Always release the menu/knobs for this revision — never leave the UI stuck.
+                if revision == eqRevision { changingEQ = false }
+            }
             do {
                 let result = try await operation()
                 if revision == eqRevision {
@@ -282,7 +286,6 @@ struct RecordPlayerMixer: View {
                     }
                 }
             }
-            if revision == eqRevision { changingEQ = false }
         }
     }
 }

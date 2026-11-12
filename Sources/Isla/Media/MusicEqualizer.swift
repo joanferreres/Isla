@@ -141,16 +141,15 @@ actor MusicEqualizer {
         return desired
     }
 
-    /// Applies a Music EQ preset onto Manual (so knobs stay in sync) and leaves EQ On.
+    /// Activates a factory (or Manual) EQ preset by name and leaves EQ On.
+    /// AppleScript cannot set `current EQ preset` on modern Music — AX popup is required.
+    /// Does **not** rewrite Manual when choosing a factory preset (that was silently no-op’ing audio).
     func selectPreset(_ name: String) async throws -> [MixerBand: Double] {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw Failure.preset }
         let bands = try readPresetBands(trimmed)
-        let gains = gainsFromBands(bands)
-        desired = gains
-        try writeManualRaw(bands)
-        try await ensureManualEQEnabled()
-        try writeManualRaw(bands)
+        desired = gainsFromBands(bands)
+        try await activateNamedPreset(trimmed)
         return desired
     }
 
@@ -238,13 +237,17 @@ actor MusicEqualizer {
     /// Make sure EQ is On and Manual is the active preset. Band values themselves
     /// are already on Manual via AppleScript; this only wires playback to them.
     private func ensureManualEQEnabled() async throws {
-        // Fast path: already On + Manual — no window needed.
-        if appleScriptBool("""
+        if isEQEnabledAndPreset(manualPreset) { return }
+        try await activateNamedPreset(manualPreset)
+    }
+
+    private func isEQEnabledAndPreset(_ name: String) -> Bool {
+        appleScriptBool("""
             tell application "Music"
               try
                 if EQ enabled is false then return false
                 try
-                  return (name of current EQ preset is "\(manualPreset)")
+                  return (name of current EQ preset is "\(escapeAppleScript(name))")
                 on error
                   return false
                 end try
@@ -252,20 +255,28 @@ actor MusicEqualizer {
                 return false
               end try
             end tell
-            """) == true {
-            return
-        }
+            """) == true
+    }
 
-        // Show / open EQ window just long enough for AX enable + Manual select.
+    /// Reveal EQ UI briefly, turn EQ On, select `name` in the preset popup, then hide again.
+    private func activateNamedPreset(_ name: String) async throws {
         revealEqualizerWindow()
         let controls = try await openControlsIfNeeded()
         try setEnabled(true, on: controls.toggle)
-        do {
-            try await selectPresetViaPopup(manualPreset, popup: try findControls().popup)
-        } catch {
-            // Popup can flake; Manual bands are still written — leave EQ On.
+        let live = try findControls()
+        if popupTitle(live.popup)?.caseInsensitiveCompare(name) != .orderedSame {
+            try await selectPresetViaPopup(name, popup: live.popup)
         }
-        // Prefer hiding (keeps the EQ window object alive) over destroying it.
+        // Confirm via AX (AppleScript often cannot read current EQ preset while window was hidden).
+        let confirmed = try findControls()
+        if popupTitle(confirmed.popup)?.caseInsensitiveCompare(name) != .orderedSame {
+            try await selectPresetViaPopup(name, popup: confirmed.popup)
+            let again = try findControls()
+            guard popupTitle(again.popup)?.caseInsensitiveCompare(name) == .orderedSame else {
+                hideEqualizerWindow()
+                throw Failure.preset
+            }
+        }
         hideEqualizerWindow()
         parkEqualizerWindows()
     }
@@ -424,19 +435,33 @@ actor MusicEqualizer {
         guard AXUIElementPerformAction(popup, kAXPressAction as CFString) == .success else {
             throw Failure.preset
         }
-        try await Task.sleep(for: .milliseconds(120))
-        var item = findMenuItem(named: name, under: popup)
-        if item == nil {
-            item = findMenuItem(named: name, under: try musicApplication())
+        var item: AXUIElement?
+        for _ in 0..<8 {
+            try await Task.sleep(for: .milliseconds(60))
+            item = findMenuItem(named: name, under: popup)
+            if item == nil, let app = try? musicApplication() {
+                item = findMenuItem(named: name, under: app)
+            }
+            if item != nil { break }
         }
         guard let item else {
             _ = AXUIElementPerformAction(popup, kAXCancelAction as CFString)
             throw Failure.preset
         }
         guard AXUIElementPerformAction(item, kAXPressAction as CFString) == .success else {
+            _ = AXUIElementPerformAction(popup, kAXCancelAction as CFString)
             throw Failure.preset
         }
-        try await Task.sleep(for: .milliseconds(80))
+        for _ in 0..<6 {
+            try await Task.sleep(for: .milliseconds(50))
+            if popupTitle(popup)?.caseInsensitiveCompare(name) == .orderedSame { return }
+            // Popup title attribute can lag; re-resolve controls.
+            if let title = try? findControls(),
+               popupTitle(title.popup)?.caseInsensitiveCompare(name) == .orderedSame {
+                return
+            }
+        }
+        throw Failure.preset
     }
 
     private func findMenuItem(named name: String, under root: AXUIElement) -> AXUIElement? {
