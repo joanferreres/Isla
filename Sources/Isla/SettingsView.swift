@@ -101,7 +101,7 @@ enum SettingsPage:String,CaseIterable,Identifiable {
  Section {
  Text("Carátula, canción actual y controles de reproducción.").font(.caption).foregroundStyle(.secondary)
  if let error=music.error { Text(error).font(.caption).foregroundStyle(.orange) }
- Text("Con EQ con IA, al cambiar de canción se estima el género y se aplica un preset o Graves/Medios/Agudos. También con el estilo «Claude» del tocadiscos.").font(.caption).foregroundStyle(.secondary)
+ Text("Con EQ con IA, al cambiar de canción o de salida (AirPods ↔ altavoces) se estima el género y se adapta el EQ. También con el estilo «Claude» del tocadiscos.").font(.caption).foregroundStyle(.secondary)
  MusicAIEQKeySetup(enabled: store.value.musicClaudeEQEnabled && store.value.musicEnabled)
  } header: { Label("Música e IA EQ",systemImage:"music.note") }
  Section {

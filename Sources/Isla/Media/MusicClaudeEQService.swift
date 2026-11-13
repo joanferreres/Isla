@@ -48,12 +48,13 @@ actor MusicClaudeEQService {
         title: String,
         artist: String,
         presets: [String],
+        output: MusicAudioOutput,
         interactiveAuth: Bool = false
     ) async throws -> Advice {
-        let key = cacheKey(title: title, artist: artist)
+        let key = cacheKey(title: title, artist: artist, output: output)
         if let cached = cache[key] { return cached }
 
-        let prompt = advicePrompt(title: title, artist: artist, presets: presets)
+        let prompt = advicePrompt(title: title, artist: artist, presets: presets, output: output)
         var lastAuth: String?
         var lastNetwork: String?
 
@@ -62,6 +63,7 @@ actor MusicClaudeEQService {
             let auth = try await reader.claudeAPIAuth(interactive: interactiveAuth)
             var advice = try await askClaude(auth: auth, system: prompt.system, user: prompt.user, presets: presets)
             advice.provider = "Claude"
+            advice = output.adapted(advice)
             remember(advice, key: key)
             return advice
         } catch let failure as Failure {
@@ -79,6 +81,7 @@ actor MusicClaudeEQService {
             let openAIKey = try await reader.openAIAPIKey()
             var advice = try await askOpenAI(apiKey: openAIKey, system: prompt.system, user: prompt.user, presets: presets)
             advice.provider = "ChatGPT"
+            advice = output.adapted(advice)
             remember(advice, key: key)
             return advice
         } catch let failure as Failure {
@@ -91,19 +94,25 @@ actor MusicClaudeEQService {
         }
     }
 
-    private func advicePrompt(title: String, artist: String, presets: [String]) -> (system: String, user: String) {
+    private func advicePrompt(
+        title: String,
+        artist: String,
+        presets: [String],
+        output: MusicAudioOutput
+    ) -> (system: String, user: String) {
         let presetList = presets.filter { !$0.isEmpty && $0.caseInsensitiveCompare("Manual") != .orderedSame }
             .prefix(40)
             .joined(separator: ", ")
         let system = """
-        You pick Apple Music equalizer settings for better listening.
+        You pick Apple Music equalizer settings for better listening on the current output device.
         Reply with ONLY compact JSON (no markdown):
         {"genre":"short genre","preset":"Exact Factory Name or null","bass":-12..12,"mid":-12..12,"treble":-12..12,"note":"optional short reason"}
         Prefer a factory preset from this list when it fits: [\(presetList)].
         If none fits, set preset to null and use bass/mid/treble in dB (integers).
         Keep gains subtle (−6…+6) unless the genre clearly needs more.
+        Adapt the curve to this output: \(output.promptHint)
         """
-        let user = "Track: \"\(title)\" by \"\(artist.isEmpty ? "unknown" : artist)\"."
+        let user = "Track: \"\(title)\" by \"\(artist.isEmpty ? "unknown" : artist)\". Output: \(output.shortLabel)."
         return (system, user)
     }
 
@@ -177,8 +186,8 @@ actor MusicClaudeEQService {
         }
     }
 
-    private func cacheKey(title: String, artist: String) -> String {
-        "\(title.lowercased())|\(artist.lowercased())"
+    private func cacheKey(title: String, artist: String, output: MusicAudioOutput) -> String {
+        "\(title.lowercased())|\(artist.lowercased())|\(output.kind.rawValue)|\(output.uid.lowercased())"
     }
 
     private func claudeText(from data: Data) -> String? {

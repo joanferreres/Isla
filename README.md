@@ -44,6 +44,7 @@ Isla convierte el notch del Mac en un espacio compacto para música, calendario,
 
 - En **Ajustes → Módulos → Funciones**: interruptores para Apple Music, **EQ con IA**, Calendario, bandeja de archivos, tocadiscos en el escritorio y efecto de tapa.
 - En el tocadiscos, el menú de estilo incluye **Claude** (respeta el interruptor de EQ con IA).
+- El EQ con IA detecta la salida (AirPods, auriculares o altavoces del Mac) y adapta la curva al cambiar de dispositivo.
 - API keys de **Claude** y **ChatGPT** en el llavero (orden: OAuth Claude Code → key Claude → key ChatGPT, o `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
 
 ### Calendario, IA, archivos y tapa
@@ -98,7 +99,7 @@ Sustitución manual: sal de Isla → descarga el ZIP → reemplaza la app en Apl
 
 ## Versión actual
 
-**Isla 0.8.73** (compilación 103).
+**Isla 0.8.74** (compilación 104).
 
 Artefactos de release esperados: `Isla.zip` + `SHA256SUMS.txt`. Firma: identidad personal `Isla Personal Code Signing` (Team ID vacío; **sin notarización**). Gatekeeper puede pedir «Abrir igualmente».
 

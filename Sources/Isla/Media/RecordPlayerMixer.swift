@@ -24,6 +24,8 @@ struct RecordPlayerMixer: View {
     @State private var selectedPreset: String?
     @State private var claudeStatus: String?
     @State private var lastClaudeTrackID: String?
+    @State private var lastClaudeOutputKey: String?
+    @StateObject private var audioOutput = MusicAudioOutputMonitor()
 
     /// Style entry in the EQ menu — enables Claude auto-EQ (not a Music factory preset).
     private static let claudeStyleName = "Claude"
@@ -48,7 +50,7 @@ struct RecordPlayerMixer: View {
             }
             .fixedSize(horizontal: false, vertical: true)
             if preferences.value.musicClaudeEQEnabled {
-                Text(claudeStatus ?? "Estilo Claude — EQ según el tipo de música")
+                Text(claudeStatus ?? "Estilo Claude — EQ según música y salida (\(audioOutput.output.shortLabel))")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -70,6 +72,7 @@ struct RecordPlayerMixer: View {
             Text(MusicEqualizer.Failure.access.localizedDescription)
         }
         .task(id: active) {
+            audioOutput.setActive(active)
             guard active else { return }
             await readVolume()
             await loadPresets()
@@ -87,9 +90,15 @@ struct RecordPlayerMixer: View {
             if enabled {
                 selectedPreset = Self.claudeStyleName
                 lastClaudeTrackID = nil
+                lastClaudeOutputKey = nil
             } else if selectedPreset == Self.claudeStyleName {
                 selectedPreset = nil
             }
+        }
+        .onChange(of: audioOutput.output) { _, _ in
+            // Re-tune when switching AirPods ↔ speakers (or any default output).
+            lastClaudeTrackID = nil
+            lastClaudeOutputKey = nil
         }
         .task(id: volumeRequest) {
             guard let target = volumeRequest else { return }
@@ -117,7 +126,8 @@ struct RecordPlayerMixer: View {
     private var autoEQTaskID: String {
         let track = music.state.snapshot?.trackID ?? ""
         let enabled = preferences.value.musicClaudeEQEnabled && active && music.enabled
-        return "\(enabled)|\(track)"
+        let route = "\(audioOutput.output.kind.rawValue)|\(audioOutput.output.uid)"
+        return "\(enabled)|\(track)|\(route)"
     }
 
     @ViewBuilder private var presetMenu: some View {
@@ -273,7 +283,8 @@ struct RecordPlayerMixer: View {
         preferences.value.musicClaudeEQEnabled = true
         selectedPreset = Self.claudeStyleName
         lastClaudeTrackID = nil
-        claudeStatus = "Estilo Claude — EQ según el tipo de música"
+        lastClaudeOutputKey = nil
+        claudeStatus = "Estilo Claude — EQ según música y \(audioOutput.output.shortLabel)"
     }
 
     private func disableClaudeStyle() {
@@ -348,18 +359,21 @@ struct RecordPlayerMixer: View {
             return
         }
         guard let snapshot = music.state.snapshot, !snapshot.title.isEmpty else { return }
-        if snapshot.trackID == lastClaudeTrackID { return }
+        let output = audioOutput.output
+        let outputKey = "\(output.kind.rawValue)|\(output.uid)"
+        if snapshot.trackID == lastClaudeTrackID, outputKey == lastClaudeOutputKey { return }
         try? await Task.sleep(for: .milliseconds(450))
         guard !Task.isCancelled else { return }
         guard preferences.value.musicClaudeEQEnabled, active else { return }
         guard music.state.snapshot?.trackID == snapshot.trackID else { return }
         if presets.isEmpty { await loadPresets() }
-        claudeStatus = "Claude EQ…"
+        claudeStatus = "Claude EQ · \(output.shortLabel)…"
         do {
             let advice = try await claudeEQ.advise(
                 title: snapshot.title,
                 artist: snapshot.artist,
                 presets: presets,
+                output: output,
                 interactiveAuth: false
             )
             guard !Task.isCancelled, music.state.snapshot?.trackID == snapshot.trackID else { return }
@@ -372,7 +386,7 @@ struct RecordPlayerMixer: View {
                     selectedPreset = Self.claudeStyleName
                     return result
                 }
-                claudeStatus = "\(advice.genre) · \(preset) · \(advice.provider)"
+                claudeStatus = "\(advice.genre) · \(preset) · \(output.shortLabel) · \(advice.provider)"
             } else {
                 let target: [MixerBand: Double] = [
                     .bass: advice.bass, .mid: advice.mid, .treble: advice.treble
@@ -382,9 +396,10 @@ struct RecordPlayerMixer: View {
                     selectedPreset = Self.claudeStyleName
                     return result
                 }
-                claudeStatus = "\(advice.genre) · bandas · \(advice.provider)"
+                claudeStatus = "\(advice.genre) · bandas · \(output.shortLabel) · \(advice.provider)"
             }
             lastClaudeTrackID = snapshot.trackID
+            lastClaudeOutputKey = outputKey
         } catch let failure as MusicClaudeEQService.Failure {
             guard !Task.isCancelled else { return }
             claudeStatus = failure.localizedDescription
