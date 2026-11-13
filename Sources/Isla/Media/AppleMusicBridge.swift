@@ -408,17 +408,31 @@ actor AppleMusicBridge:AppleMusicReading {
  if let error=reply.error { throw MusicFailure(message:error,code:reply.errorCode) };return reply
  }
  func read() async throws -> MediaSnapshot? {
- if Date() >= retrySystemAfter {
+ // Prefer AppleScript: stable Music persistent IDs for changer, EQ, playlists.
+ // MediaRemote IDs (mediaremote:…) break those paths when used as the primary identity.
  do {
- let reply=try SystemMediaArtwork().read()
- systemReply=reply
- if let snapshot=reply?.snapshot { return snapshot }
- } catch { retrySystemAfter=Date().addingTimeInterval(60);systemReply=nil }
+  if let snapshot=try query("read").snapshot { return snapshot }
+ } catch let failure as MusicFailure where failure.code == -1743 {
+  throw failure
+ } catch {
+  // Fall through to MediaRemote when AppleScript is briefly unavailable.
  }
- return try query("read").snapshot
+ if Date() >= retrySystemAfter {
+  do {
+   let reply=try SystemMediaArtwork().read()
+   systemReply=reply
+   if let snapshot=reply?.snapshot { return snapshot }
+  } catch { retrySystemAfter=Date().addingTimeInterval(60);systemReply=nil }
  }
+ return nil
+ }
+ func cacheSystemArtwork(_ reply:MusicReply) { systemReply=reply }
  func artwork(trackID:String) async throws -> Data? {
  if trackID.hasPrefix("mediaremote:") { return systemReply?.artwork(for:trackID) }
+ if let cached=systemReply?.artwork, cached.isEmpty == false {
+  // MediaRemote cover often arrives before AppleScript artwork; reuse by title match via refresh path.
+  return try query("artwork").artwork(for:trackID) ?? cached
+ }
  return try query("artwork").artwork(for:trackID)
  }
  func neighbors() async throws -> MusicNeighbors? {

@@ -38,18 +38,17 @@ import IslandCore
         ) { [weak self] _ in Task { @MainActor in await self?.refresh() } }
         stream.onReply = { [weak self] reply in
             guard let self, self.enabled else { return }
-            if let snapshot = reply.snapshot {
-                let changed = self.state.snapshot?.trackID != snapshot.trackID
-                self.state.update(snapshot)
-                self.receivedAt = Date()
-                self.error = nil
-                if let data = reply.artwork(for: snapshot.trackID) {
-                    _ = self.state.acceptArtwork(data, for: snapshot.trackID)
+            // MediaRemote is a nudge + cover source. Identity always comes from AppleScript
+            // so changer / EQ / playlists keep Music persistent IDs.
+            Task { @MainActor in
+                if let bridge = self.reader as? AppleMusicBridge {
+                    await bridge.cacheSystemArtwork(reply)
                 }
-                self.ingestCurrentCover(forceNeighbors: changed)
-                if changed { self.scheduleNeighborPrefetch(generation: self.generation) }
-            } else {
-                Task { await self.refresh() }
+                await self.refresh()
+                if let data = reply.artwork, let id = self.state.snapshot?.trackID {
+                    _ = self.state.acceptArtwork(data, for: id)
+                    self.ingestCurrentCover(forceNeighbors: false)
+                }
             }
         }
         stream.onStopped = { [weak self] in
@@ -115,7 +114,7 @@ import IslandCore
     }
 
     func refresh() async {
-        guard enabled, !refreshing, !permissionDenied else { return }
+        guard enabled, !refreshing else { return }
         refreshing = true
         defer { refreshing = false }
         let current = generation
@@ -130,6 +129,7 @@ import IslandCore
         do {
             let snapshot = try await reader.read()
             guard enabled, current == generation else { return }
+            permissionDenied = false
             let changed = state.snapshot?.trackID != snapshot?.trackID
             state.update(snapshot)
             receivedAt = Date()
@@ -141,7 +141,7 @@ import IslandCore
                 state.update(latest)
                 receivedAt = Date()
                 if let data, latest?.trackID == snapshot.trackID {
-                    _ = state.acceptArtwork(data, for: snapshot.trackID)
+                    _ = self.state.acceptArtwork(data, for: snapshot.trackID)
                 }
             }
             ingestCurrentCover(forceNeighbors: changed || neighborArt.nextTrackID == nil)
@@ -151,15 +151,17 @@ import IslandCore
         } catch {
             guard enabled, current == generation else { return }
             self.error = error.localizedDescription
+            if (error as? MusicFailure)?.code == -1743 {
+                permissionDenied = true
+                // Keep last good snapshot; only stop the fallback timer while denied.
+                timer?.invalidate()
+                timer = nil
+                return
+            }
             state.update(nil)
             neighborArt = MusicNeighbors()
             coverTrail.reset()
             publishCovers()
-            if (error as? MusicFailure)?.code == -1743 {
-                permissionDenied = true
-                timer?.invalidate()
-                timer = nil
-            }
         }
     }
 

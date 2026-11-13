@@ -131,11 +131,7 @@ actor AICredentialReader {
     if SecItemCopyMatching(read as CFDictionary,&secret) == errSecSuccess { data=secret as? Data }
    }
   }
-  if let data,let oauth=claudeOAuthPayload(data) {
-   if oauth.empty {
-    throw MusicFailure(message:"Claude Code está sin sesión OAuth. Una API key no basta: en la terminal ejecuta «claude auth login» e inicia sesión con tu cuenta Anthropic.")
-   }
-   guard oauth.expiry>Date() else { throw MusicFailure(message:"La sesión de Claude Code ha caducado. Ejecuta «claude auth login» de nuevo; conceder acceso al llavero no renueva la sesión.") }
+  if let data,let oauth=claudeOAuthPayload(data),!oauth.empty,oauth.expiry>Date() {
    cachedClaude=data;cachedUntil=oauth.expiry
    if home == FileManager.default.homeDirectoryForCurrentUser { saveSession(token:oauth.token,expiry:oauth.expiry) }
    var request=URLRequest(url:URL(string:"https://api.anthropic.com/api/oauth/usage")!)
@@ -143,28 +139,61 @@ actor AICredentialReader {
    request.setValue("oauth-2025-04-20",forHTTPHeaderField:"anthropic-beta")
    return request
   }
+  // Empty/expired Claude Code-credentials (common when Claude Code uses ANTHROPIC_API_KEY only).
+  if data != nil { forgetClaude() }
+  if anthropicAPIKey() != nil {
+   throw MusicFailure(message:"Claude Code está con API key (sin OAuth). El EQ funciona; para ver límites en Isla ejecuta «claude auth login».")
+  }
   throw MusicFailure(message:interactive
-   ? "No se pudo leer la sesión de Claude Code. Inicia sesión con «claude auth login» y vuelve a permitir el acceso al llavero."
-   : "No se pudo leer la sesión de Claude Code. Pulsa «Permitir acceso a Claude» o inicia sesión con «claude auth login».")
+   ? "No hay sesión OAuth de Claude Code ni API key. Ejecuta «claude auth login» o pega una key sk-ant- en Ajustes → Música."
+   : "No hay sesión OAuth de Claude Code. Pulsa «Permitir acceso a Claude», ejecuta «claude auth login», o pega una API key en Ajustes → Música.")
  }
 
  /// Credential for calling Anthropic Messages (auto-EQ, etc.).
- /// Order: Claude Code OAuth (same as Isla IA) → keychain API key → `ANTHROPIC_API_KEY`.
+ /// Order: Claude Code OAuth → Isla keychain → process env → login-shell `ANTHROPIC_API_KEY`.
  func claudeAPIAuth(interactive:Bool=false,home:URL=FileManager.default.homeDirectoryForCurrentUser) throws -> ClaudeAPIAuth {
   if let oauth=try? claudeOAuthToken(interactive:interactive,home:home) {
    return .oauth(token:oauth)
   }
-  if let key=storedSecret(service:apiKeyService),!key.isEmpty { return .apiKey(key) }
-  if let key=ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]?
-   .trimmingCharacters(in:.whitespacesAndNewlines),!key.isEmpty {
-   return .apiKey(key)
-  }
+  if let key=anthropicAPIKey() { return .apiKey(key) }
   throw MusicFailure(message:"""
   Auto-EQ con Claude necesita autenticación.
   1) Preferido: «claude auth login» (Claude Code) y permitir el llavero en Isla → IA → Claude.
-  2) O pega una API key de Anthropic en Ajustes → Música → EQ con IA.
-  3) O exporta ANTHROPIC_API_KEY en el entorno al lanzar Isla.
+  2) O pega una API key de Anthropic (sk-ant-…) en Ajustes → Música → EQ con IA.
+  3) O define ANTHROPIC_API_KEY en tu shell de login (~/.zshrc); Isla la importa al llavero.
   """)
+ }
+
+ /// Any Anthropic API key Isla can use (keychain, env, or login shell).
+ func anthropicAPIKey() -> String? {
+  if let key=storedSecret(service:apiKeyService),!key.isEmpty { return key }
+  if let key=ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]?
+   .trimmingCharacters(in:.whitespacesAndNewlines),!key.isEmpty {
+   try? storeSecret(key,service:apiKeyService)
+   return key
+  }
+  if let key=loginShellAnthropicAPIKey() {
+   try? storeSecret(key,service:apiKeyService)
+   return key
+  }
+  return nil
+ }
+
+ /// GUI apps don't inherit ~/.zshrc — read ANTHROPIC_API_KEY from a login shell once.
+ private func loginShellAnthropicAPIKey() -> String? {
+  let shell=ProcessInfo.processInfo.environment["SHELL"].flatMap{ $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
+  let process=Process()
+  process.executableURL=URL(fileURLWithPath:shell)
+  process.arguments=["-l","-c","printenv ANTHROPIC_API_KEY"]
+  let pipe=Pipe();process.standardOutput=pipe;process.standardError=FileHandle.nullDevice
+  do { try process.run() } catch { return nil }
+  let data=pipe.fileHandleForReading.readDataToEndOfFile()
+  process.waitUntilExit()
+  guard process.terminationStatus == 0,
+        let key=String(data:data,encoding:.utf8)?
+   .trimmingCharacters(in:.whitespacesAndNewlines),
+        key.hasPrefix("sk-ant-"),key.count>20 else { return nil }
+  return key
  }
 
  /// OpenAI / ChatGPT API key for music AI EQ fallback.
@@ -227,12 +256,31 @@ actor AICredentialReader {
  }
 
  private func claudeOAuthToken(interactive:Bool,home:URL) throws -> String {
-  let request=try request(.claude,interactive:interactive,home:home)
-  guard let auth=request.value(forHTTPHeaderField:"Authorization"),
-        auth.hasPrefix("Bearer ") else {
-   throw MusicFailure(message:"Sesión de Claude Code incompleta.")
+  // Only return a live OAuth bearer — never the API-key fallback path from request(.claude).
+  let directory=ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"].map{URL(fileURLWithPath:$0)} ?? home.appendingPathComponent(".claude")
+  var data=try? Data(contentsOf:directory.appendingPathComponent(".credentials.json"))
+  if data == nil,Date()<cachedUntil { data=cachedClaude }
+  if data == nil,home == FileManager.default.homeDirectoryForCurrentUser { data=savedSession() }
+  if data == nil {
+   var wasAllowed:DarwinBoolean=true
+   SecKeychainGetUserInteractionAllowed(&wasAllowed)
+   SecKeychainSetUserInteractionAllowed(interactive)
+   defer { SecKeychainSetUserInteractionAllowed(wasAllowed.boolValue) }
+   let context=LAContext();context.interactionNotAllowed=true
+   let query:[CFString:Any]=[kSecClass:kSecClassGenericPassword,kSecAttrService:"Claude Code-credentials",kSecReturnAttributes:true,kSecReturnPersistentRef:true,kSecMatchLimit:kSecMatchLimitAll,kSecUseAuthenticationContext:context]
+   var result:CFTypeRef?
+   if SecItemCopyMatching(query as CFDictionary,&result) == errSecSuccess,let rows=result as? [[String:Any]],let newest=rows.sorted(by:{($0[kSecAttrModificationDate as String] as? Date ?? .distantPast)>($1[kSecAttrModificationDate as String] as? Date ?? .distantPast)}).first,let ref=newest[kSecValuePersistentRef as String] {
+    context.interactionNotAllowed = !interactive
+    let read:[CFString:Any]=[kSecClass:kSecClassGenericPassword,kSecValuePersistentRef:ref,kSecReturnData:true,kSecMatchLimit:kSecMatchLimitOne,kSecUseAuthenticationContext:context]
+    var secret:CFTypeRef?
+    if SecItemCopyMatching(read as CFDictionary,&secret) == errSecSuccess { data=secret as? Data }
+   }
   }
-  return String(auth.dropFirst("Bearer ".count))
+  guard let data,let oauth=claudeOAuthPayload(data),!oauth.empty,oauth.expiry>Date() else {
+   throw MusicFailure(message:"Sin sesión OAuth válida de Claude Code.")
+  }
+  cachedClaude=data;cachedUntil=oauth.expiry
+  return oauth.token
  }
 }
 @MainActor final class AIUsageService:ObservableObject {

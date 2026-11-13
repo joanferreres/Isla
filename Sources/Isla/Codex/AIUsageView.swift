@@ -106,7 +106,7 @@ import IslandCore
  if enabled {
  if service.provider == .claude {
  Button(service.accessRequested ? "Volver a conectar Claude" : "Permitir acceso a Claude") { Task { await service.refresh(interactive:true) } }.disabled(service.loading)
- Text("Hace falta sesión OAuth de Claude Code («claude auth login»). Una API key no muestra límites. El acceso al llavero se puede volver a pedir aquí.").font(.caption).foregroundStyle(.secondary)
+ Text("Límites: sesión OAuth de Claude Code («claude auth login»). El EQ también acepta API key (Ajustes → Música o ANTHROPIC_API_KEY en tu shell).").font(.caption).foregroundStyle(.secondary)
  }
  if service.provider == .cursor {
  Text("Isla lee la sesión cifrada de la app Cursor; macOS puede pedir acceso a «Cursor Safe Storage».").font(.caption).foregroundStyle(.secondary)
