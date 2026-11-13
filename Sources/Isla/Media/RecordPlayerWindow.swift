@@ -127,6 +127,8 @@ private final class RecordPlayerDesktopPanel: NSPanel {
             backing: .buffered, defer: false
         )
         window.title = "Tocadiscos · Isla"
+        window.miniwindowTitle = "Tocadiscos · Isla"
+        window.miniwindowImage = Self.turntableMiniwindowImage()
         window.isReleasedWhenClosed = false
         window.contentMinSize = NSSize(width: 560, height: 480)
         window.collectionBehavior = [.fullScreenPrimary, .managed]
@@ -149,7 +151,60 @@ private final class RecordPlayerDesktopPanel: NSPanel {
         return window
     }
 
+    /// Dock miniwindow mark: vinyl + Isla cyan→violet island, not a live window snapshot.
+    private static func turntableMiniwindowImage() -> NSImage {
+        let size = NSSize(width: 128, height: 128)
+        return NSImage(size: size, flipped: false) { rect in
+            let inset = rect.insetBy(dx: 6, dy: 6)
+            NSColor(srgbRed: 0.06, green: 0.07, blue: 0.09, alpha: 1).setFill()
+            NSBezierPath(roundedRect: inset, xRadius: 28, yRadius: 28).fill()
+
+            let disc = NSBezierPath(ovalIn: inset.insetBy(dx: 14, dy: 14))
+            NSColor(srgbRed: 0.08, green: 0.09, blue: 0.11, alpha: 1).setFill()
+            disc.fill()
+            NSColor(srgbRed: 0.18, green: 0.19, blue: 0.22, alpha: 1).setStroke()
+            disc.lineWidth = 1.5
+            disc.stroke()
+
+            let center = CGPoint(x: inset.midX, y: inset.midY)
+            for radius in stride(from: 18.0, through: 42.0, by: 5.0) {
+                let ring = NSBezierPath(ovalIn: CGRect(x: center.x - radius, y: center.y - radius,
+                                                       width: radius * 2, height: radius * 2))
+                NSColor.white.withAlphaComponent(0.06).setStroke()
+                ring.lineWidth = 1
+                ring.stroke()
+            }
+
+            let label = CGRect(x: center.x - 18, y: center.y - 18, width: 36, height: 36)
+            let cyan = NSColor(srgbRed: 0.05, green: 0.88, blue: 0.95, alpha: 1)
+            let violet = NSColor(srgbRed: 0.66, green: 0.32, blue: 1, alpha: 1)
+            let island = NSBezierPath(roundedRect: label.insetBy(dx: 2, dy: 10), xRadius: 8, yRadius: 8)
+            NSGradient(starting: cyan, ending: violet)?.draw(in: island, angle: 0)
+            NSColor(srgbRed: 0.04, green: 0.05, blue: 0.07, alpha: 1).setFill()
+            NSBezierPath(roundedRect: label.insetBy(dx: 6, dy: 14), xRadius: 4, yRadius: 4).fill()
+            NSColor.white.setFill()
+            NSBezierPath(roundedRect: CGRect(x: center.x - 6, y: center.y - 1.5, width: 12, height: 3),
+                         xRadius: 1.5, yRadius: 1.5).fill()
+
+            let arm = NSBezierPath()
+            arm.move(to: CGPoint(x: inset.maxX - 22, y: inset.maxY - 28))
+            arm.line(to: CGPoint(x: center.x + 10, y: center.y + 6))
+            NSColor(srgbRed: 0.72, green: 0.74, blue: 0.78, alpha: 1).setStroke()
+            arm.lineWidth = 3
+            arm.lineCapStyle = .round
+            arm.stroke()
+            NSColor(srgbRed: 0.9, green: 0.25, blue: 0.28, alpha: 1).setFill()
+            NSBezierPath(ovalIn: CGRect(x: center.x + 6, y: center.y + 2, width: 7, height: 7)).fill()
+            return true
+        }
+    }
+
     func windowDidChangeOcclusionState(_ notification: Notification) { refreshVisibility() }
+    func windowWillMiniaturize(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === self.window else { return }
+        window.miniwindowTitle = "Tocadiscos · Isla"
+        window.miniwindowImage = Self.turntableMiniwindowImage()
+    }
     func windowDidMiniaturize(_ notification: Notification) { presentation.isVisible = false }
     func windowDidDeminiaturize(_ notification: Notification) { refreshVisibility() }
     func windowWillClose(_ notification: Notification) {
