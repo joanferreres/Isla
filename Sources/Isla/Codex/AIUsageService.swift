@@ -17,6 +17,7 @@ actor AICredentialReader {
  private var cachedCursorSealed:String?
  private let savedService="local.personal.isla.claude-session"
  private let apiKeyService="local.personal.isla.anthropic-api-key"
+ private let openAIKeyService="local.personal.isla.openai-api-key"
  private func silentKeychain(_ query:[CFString:Any]) -> (OSStatus,CFTypeRef?) {
   var allowed:DarwinBoolean=true;SecKeychainGetUserInteractionAllowed(&allowed);SecKeychainSetUserInteractionAllowed(false)
   defer { SecKeychainSetUserInteractionAllowed(allowed.boolValue) }
@@ -153,7 +154,7 @@ actor AICredentialReader {
   if let oauth=try? claudeOAuthToken(interactive:interactive,home:home) {
    return .oauth(token:oauth)
   }
-  if let key=storedAPIKey(),!key.isEmpty { return .apiKey(key) }
+  if let key=storedSecret(service:apiKeyService),!key.isEmpty { return .apiKey(key) }
   if let key=ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]?
    .trimmingCharacters(in:.whitespacesAndNewlines),!key.isEmpty {
    return .apiKey(key)
@@ -161,22 +162,48 @@ actor AICredentialReader {
   throw MusicFailure(message:"""
   Auto-EQ con Claude necesita autenticación.
   1) Preferido: «claude auth login» (Claude Code) y permitir el llavero en Isla → IA → Claude.
-  2) O pega una API key de Anthropic en Ajustes → Música → Auto-EQ.
+  2) O pega una API key de Anthropic en Ajustes → Música → EQ con IA.
   3) O exporta ANTHROPIC_API_KEY en el entorno al lanzar Isla.
   """)
  }
 
- func hasStoredAnthropicAPIKey() -> Bool { storedAPIKey()?.isEmpty == false }
+ /// OpenAI / ChatGPT API key for music AI EQ fallback.
+ func openAIAPIKey() throws -> String {
+  if let key=storedSecret(service:openAIKeyService),!key.isEmpty { return key }
+  if let key=ProcessInfo.processInfo.environment["OPENAI_API_KEY"]?
+   .trimmingCharacters(in:.whitespacesAndNewlines),!key.isEmpty {
+   return key
+  }
+  throw MusicFailure(message:"Falta la API key de ChatGPT. Pégala en Ajustes → Música → EQ con IA, o exporta OPENAI_API_KEY.")
+ }
+
+ func hasStoredAnthropicAPIKey() -> Bool { storedSecret(service:apiKeyService)?.isEmpty == false }
+ func hasStoredOpenAIAPIKey() -> Bool { storedSecret(service:openAIKeyService)?.isEmpty == false }
 
  func saveAnthropicAPIKey(_ key:String) throws {
   let trimmed=key.trimmingCharacters(in:.whitespacesAndNewlines)
   guard trimmed.hasPrefix("sk-ant-"),trimmed.count>20 else {
    throw MusicFailure(message:"La API key de Anthropic debe empezar por sk-ant-.")
   }
-  let query:[CFString:Any]=[kSecClass:kSecClassGenericPassword,kSecAttrService:apiKeyService,kSecAttrAccount:"api-key"]
+  try storeSecret(trimmed,service:apiKeyService)
+ }
+
+ func saveOpenAIAPIKey(_ key:String) throws {
+  let trimmed=key.trimmingCharacters(in:.whitespacesAndNewlines)
+  guard trimmed.hasPrefix("sk-"),!trimmed.hasPrefix("sk-ant-"),trimmed.count>20 else {
+   throw MusicFailure(message:"La API key de OpenAI/ChatGPT debe empezar por sk- (no sk-ant-).")
+  }
+  try storeSecret(trimmed,service:openAIKeyService)
+ }
+
+ func clearAnthropicAPIKey() { clearSecret(service:apiKeyService) }
+ func clearOpenAIAPIKey() { clearSecret(service:openAIKeyService) }
+
+ private func storeSecret(_ value:String,service:String) throws {
+  let query:[CFString:Any]=[kSecClass:kSecClassGenericPassword,kSecAttrService:service,kSecAttrAccount:"api-key"]
   var allowed:DarwinBoolean=true;SecKeychainGetUserInteractionAllowed(&allowed);SecKeychainSetUserInteractionAllowed(false)
   defer { SecKeychainSetUserInteractionAllowed(allowed.boolValue) }
-  let data=Data(trimmed.utf8)
+  let data=Data(value.utf8)
   if SecItemUpdate(query as CFDictionary,[kSecValueData:data] as CFDictionary) == errSecItemNotFound {
    var add=query;add[kSecValueData]=data;add[kSecAttrAccessible]=kSecAttrAccessibleAfterFirstUnlock
    let status=SecItemAdd(add as CFDictionary,nil)
@@ -186,14 +213,14 @@ actor AICredentialReader {
   }
  }
 
- func clearAnthropicAPIKey() {
+ private func clearSecret(service:String) {
   var allowed:DarwinBoolean=true;SecKeychainGetUserInteractionAllowed(&allowed);SecKeychainSetUserInteractionAllowed(false)
   defer { SecKeychainSetUserInteractionAllowed(allowed.boolValue) }
-  SecItemDelete([kSecClass:kSecClassGenericPassword,kSecAttrService:apiKeyService,kSecAttrAccount:"api-key"] as CFDictionary)
+  SecItemDelete([kSecClass:kSecClassGenericPassword,kSecAttrService:service,kSecAttrAccount:"api-key"] as CFDictionary)
  }
 
- private func storedAPIKey() -> String? {
-  let (status,result)=silentKeychain([kSecClass:kSecClassGenericPassword,kSecAttrService:apiKeyService,kSecAttrAccount:"api-key",kSecReturnData:true,kSecMatchLimit:kSecMatchLimitOne])
+ private func storedSecret(service:String) -> String? {
+  let (status,result)=silentKeychain([kSecClass:kSecClassGenericPassword,kSecAttrService:service,kSecAttrAccount:"api-key",kSecReturnData:true,kSecMatchLimit:kSecMatchLimitOne])
   guard status == errSecSuccess,let data=result as? Data,let key=String(data:data,encoding:.utf8) else { return nil }
   let trimmed=key.trimmingCharacters(in:.whitespacesAndNewlines)
   return trimmed.isEmpty ? nil : trimmed

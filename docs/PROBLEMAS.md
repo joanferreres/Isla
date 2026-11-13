@@ -34,15 +34,25 @@ Isla vive en la barra superior y no se presenta como una ventana normal del Dock
 
 ## No aparece la carátula o no funcionan los controles
 
-Activa Música en ajustes, reproduce una canción y comprueba el permiso de Automatización de Music en **Ajustes del Sistema → Privacidad y seguridad**. El comportamiento de otras fuentes multimedia puede variar.
+Activa Música en ajustes, reproduce una canción y comprueba el permiso de **Automatización → Music** en **Ajustes del Sistema → Privacidad y seguridad → Automatización → Isla**. El comportamiento de otras fuentes multimedia puede variar.
+
+## Los mandos del EQ o «añadir a playlist» no hacen nada
+
+Necesitas **Accesibilidad** para Isla. Ve a **Privacidad y seguridad → Accesibilidad**, activa Isla (o quítala y vuelve a añadirla tras reinstalar) y reabre el tocadiscos. El preset Manual se aplica por Automatización; Graves/Medios/Agudos y el popup de presets usan Accesibilidad.
+
+## El EQ con IA no aplica estilo
+
+1. Activa **EQ con IA** en Ajustes → Módulos → Música, o elige estilo **Claude** en el tocadiscos.
+2. Guarda una API key de Claude o ChatGPT en esos campos (llavero), o inicia sesión con `claude auth login` y acepta el diálogo del llavero.
+3. Comprueba también Automatización → Music y Accesibilidad (el EQ final sigue pasando por Música).
 
 ## No veo eventos
 
-Activa Calendario, revisa el permiso y los calendarios seleccionados. Si lo has denegado, cámbialo manualmente en los ajustes de privacidad de macOS. La app no debe pedirlo de forma repetida.
+Activa Calendario, revisa el permiso y los calendarios seleccionados. Si lo has denegado, cámbialo manualmente en **Privacidad y seguridad → Calendarios**. La app no debe pedirlo de forma repetida.
 
 ## No aparecen límites de una IA
 
-Debes iniciar sesión con tu propia cuenta en la aplicación correspondiente y activar la conexión. Una sesión caducada o un cambio del servicio puede impedir la lectura. No envíes tokens, archivos de autenticación ni contraseñas para pedir ayuda.
+Debes iniciar sesión con tu propia cuenta en la aplicación correspondiente y activar la conexión. macOS puede pedir acceso al **llavero** (Claude Code-credentials / Cursor Safe Storage): acéptalo o Isla no podrá leer la sesión. Una sesión caducada o un cambio del servicio puede impedir la lectura. No envíes tokens, archivos de autenticación ni contraseñas para pedir ayuda.
 
 ## El efecto de tapa no aparece
 
@@ -50,7 +60,7 @@ Requiere un sensor compatible y el permiso de Grabación de pantalla. Algunos mo
 
 ## Validación pendiente
 
-La versión 0.8.42 incluye 128 pruebas automatizadas y su ZIP se valida después de extraerlo en el Mac de desarrollo. Sigue pendiente confirmar el recorrido de los clics físicos y los sensores en más equipos. No se presenta la distribución por GitHub como una solución comprobada para todos los Macs compatibles.
+La versión 0.8.71 incluye las pruebas automatizadas del paquete y su ZIP se valida después de extraerlo en el Mac de desarrollo. Sigue pendiente confirmar el recorrido de los clics físicos y los sensores en más equipos. No se presenta la distribución por GitHub como una solución comprobada para todos los Macs compatibles. La distribución actual usa firma personal **sin notarización**.
 
 ## No aparece el aviso de actualización
 

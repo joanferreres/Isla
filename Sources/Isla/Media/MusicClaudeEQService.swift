@@ -1,7 +1,7 @@
 import Foundation
 import IslandCore
 
-/// Asks Claude what kind of music is playing and maps that to Music EQ (factory preset or bands).
+/// Asks Claude (preferred) or ChatGPT what kind of music is playing and maps that to Music EQ.
 actor MusicClaudeEQService {
     struct Advice: Sendable, Equatable {
         var genre: String
@@ -10,6 +10,7 @@ actor MusicClaudeEQService {
         var mid: Double
         var treble: Double
         var note: String?
+        var provider: String = "Claude"
     }
 
     enum Failure: LocalizedError {
@@ -21,18 +22,27 @@ actor MusicClaudeEQService {
             switch self {
             case .auth(let message): message
             case .network(let message): message
-            case .decode: "Claude no devolvió un consejo de EQ usable."
+            case .decode: "La IA no devolvió un consejo de EQ usable."
             }
         }
     }
 
     private let reader = AICredentialReader()
     private var cache: [String: Advice] = [:]
-    private let model = "claude-haiku-4-5-20251001"
+    private let claudeModel = "claude-haiku-4-5-20251001"
+    private let openAIModel = "gpt-4o-mini"
 
-    func hasAPIKey() async -> Bool { await reader.hasStoredAnthropicAPIKey() }
-    func saveAPIKey(_ key: String) async throws { try await reader.saveAnthropicAPIKey(key) }
-    func clearAPIKey() async { await reader.clearAnthropicAPIKey() }
+    func hasClaudeAPIKey() async -> Bool { await reader.hasStoredAnthropicAPIKey() }
+    func hasOpenAIAPIKey() async -> Bool { await reader.hasStoredOpenAIAPIKey() }
+    func saveClaudeAPIKey(_ key: String) async throws { try await reader.saveAnthropicAPIKey(key) }
+    func saveOpenAIAPIKey(_ key: String) async throws { try await reader.saveOpenAIAPIKey(key) }
+    func clearClaudeAPIKey() async { await reader.clearAnthropicAPIKey() }
+    func clearOpenAIAPIKey() async { await reader.clearOpenAIAPIKey() }
+
+    /// Backward-compatible aliases used by older call sites.
+    func hasAPIKey() async -> Bool { await hasClaudeAPIKey() }
+    func saveAPIKey(_ key: String) async throws { try await saveClaudeAPIKey(key) }
+    func clearAPIKey() async { await clearClaudeAPIKey() }
 
     func advise(
         title: String,
@@ -43,13 +53,45 @@ actor MusicClaudeEQService {
         let key = cacheKey(title: title, artist: artist)
         if let cached = cache[key] { return cached }
 
-        let auth: ClaudeAPIAuth
+        let prompt = advicePrompt(title: title, artist: artist, presets: presets)
+        var lastAuth: String?
+        var lastNetwork: String?
+
+        // 1) Claude — OAuth or Anthropic API key.
         do {
-            auth = try await reader.claudeAPIAuth(interactive: interactiveAuth)
+            let auth = try await reader.claudeAPIAuth(interactive: interactiveAuth)
+            var advice = try await askClaude(auth: auth, system: prompt.system, user: prompt.user, presets: presets)
+            advice.provider = "Claude"
+            remember(advice, key: key)
+            return advice
+        } catch let failure as Failure {
+            switch failure {
+            case .auth(let message): lastAuth = message
+            case .network(let message): lastNetwork = message
+            case .decode: lastNetwork = failure.localizedDescription
+            }
         } catch {
-            throw Failure.auth(error.localizedDescription)
+            lastAuth = error.localizedDescription
         }
 
+        // 2) ChatGPT — OpenAI API key from keychain / env.
+        do {
+            let openAIKey = try await reader.openAIAPIKey()
+            var advice = try await askOpenAI(apiKey: openAIKey, system: prompt.system, user: prompt.user, presets: presets)
+            advice.provider = "ChatGPT"
+            remember(advice, key: key)
+            return advice
+        } catch let failure as Failure {
+            throw failure
+        } catch {
+            if let lastNetwork {
+                throw Failure.network(lastNetwork)
+            }
+            throw Failure.auth(lastAuth ?? error.localizedDescription)
+        }
+    }
+
+    private func advicePrompt(title: String, artist: String, presets: [String]) -> (system: String, user: String) {
         let presetList = presets.filter { !$0.isEmpty && $0.caseInsensitiveCompare("Manual") != .orderedSame }
             .prefix(40)
             .joined(separator: ", ")
@@ -62,7 +104,10 @@ actor MusicClaudeEQService {
         Keep gains subtle (−6…+6) unless the genre clearly needs more.
         """
         let user = "Track: \"\(title)\" by \"\(artist.isEmpty ? "unknown" : artist)\"."
+        return (system, user)
+    }
 
+    private func askClaude(auth: ClaudeAPIAuth, system: String, user: String, presets: [String]) async throws -> Advice {
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         request.httpMethod = "POST"
         request.timeoutInterval = 20
@@ -75,51 +120,83 @@ actor MusicClaudeEQService {
         case .apiKey(let key):
             request.setValue(key, forHTTPHeaderField: "x-api-key")
         }
-        let body: [String: Any] = [
-            "model": model,
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": claudeModel,
             "max_tokens": 200,
             "temperature": 0,
             "system": system,
             "messages": [["role": "user", "content": user]],
-        ]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        ] as [String: Any])
 
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await URLSession.shared.data(for: request)
-        } catch {
-            throw Failure.network(error.localizedDescription)
-        }
+        let (data, response) = try await URLSession.shared.data(for: request)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200...299).contains(code) else {
             let snippet = String(data: data, encoding: .utf8)?.prefix(180) ?? ""
             if [401, 403].contains(code) {
-                throw Failure.auth("Claude rechazó la autenticación (\(code)). Renueva «claude auth login» o la API key.")
+                throw Failure.auth("Claude rechazó la autenticación (\(code)). Revisa la key o «claude auth login».")
             }
             throw Failure.network("Claude API \(code): \(snippet)")
         }
+        guard let advice = parseAdvice(text: claudeText(from: data), presets: presets) else { throw Failure.decode }
+        return advice
+    }
 
-        guard let advice = parseAdvice(from: data, presets: presets) else { throw Failure.decode }
+    private func askOpenAI(apiKey: String, system: String, user: String, presets: [String]) async throws -> Advice {
+        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 20
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": openAIModel,
+            "temperature": 0,
+            "response_format": ["type": "json_object"],
+            "messages": [
+                ["role": "system", "content": system],
+                ["role": "user", "content": user],
+            ],
+        ] as [String: Any])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200...299).contains(code) else {
+            let snippet = String(data: data, encoding: .utf8)?.prefix(180) ?? ""
+            if [401, 403].contains(code) {
+                throw Failure.auth("ChatGPT rechazó la API key (\(code)). Revisa Ajustes → Música.")
+            }
+            throw Failure.network("OpenAI API \(code): \(snippet)")
+        }
+        guard let advice = parseAdvice(text: openAIText(from: data), presets: presets) else { throw Failure.decode }
+        return advice
+    }
+
+    private func remember(_ advice: Advice, key: String) {
         cache[key] = advice
         if cache.count > 80 {
             cache.removeValue(forKey: cache.keys.first ?? key)
         }
-        return advice
     }
 
     private func cacheKey(title: String, artist: String) -> String {
         "\(title.lowercased())|\(artist.lowercased())"
     }
 
-    private func parseAdvice(from data: Data, presets: [String]) -> Advice? {
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        let text: String
-        if let content = root["content"] as? [[String: Any]] {
-            text = content.compactMap { $0["text"] as? String }.joined()
-        } else {
-            return nil
-        }
+    private func claudeText(from data: Data) -> String? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let content = root["content"] as? [[String: Any]] else { return nil }
+        return content.compactMap { $0["text"] as? String }.joined()
+    }
+
+    private func openAIText(from data: Data) -> String? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = root["choices"] as? [[String: Any]],
+              let message = choices.first?["message"] as? [String: Any],
+              let content = message["content"] as? String else { return nil }
+        return content
+    }
+
+    private func parseAdvice(text: String?, presets: [String]) -> Advice? {
+        guard let text, !text.isEmpty else { return nil }
         let jsonText = extractJSONObject(from: text) ?? text
         guard let jsonData = jsonText.data(using: .utf8),
               let row = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else { return nil }

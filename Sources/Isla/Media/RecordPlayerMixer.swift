@@ -372,7 +372,7 @@ struct RecordPlayerMixer: View {
                     selectedPreset = Self.claudeStyleName
                     return result
                 }
-                claudeStatus = "\(advice.genre) · \(preset)"
+                claudeStatus = "\(advice.genre) · \(preset) · \(advice.provider)"
             } else {
                 let target: [MixerBand: Double] = [
                     .bass: advice.bass, .mid: advice.mid, .treble: advice.treble
@@ -382,7 +382,7 @@ struct RecordPlayerMixer: View {
                     selectedPreset = Self.claudeStyleName
                     return result
                 }
-                claudeStatus = "\(advice.genre) · bandas"
+                claudeStatus = "\(advice.genre) · bandas · \(advice.provider)"
             }
             lastClaudeTrackID = snapshot.trackID
         } catch let failure as MusicClaudeEQService.Failure {
