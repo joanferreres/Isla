@@ -26,7 +26,7 @@ import IslandCore
  if expanded {
  Color.clear.frame(height:model.headerHeight)
  HStack(spacing:width>=600 ? 10 : 5) {
- ForEach(["Inicio","Archivos","IA"],id:\.self) { tab in Button { model.section=tab } label: { HStack(spacing:4) { Image(systemName:tab == "Inicio" ? "square.grid.2x2.fill" : tab == "Archivos" ? "tray.fill" : "sparkles");if width>=600 { Text(tab) } }.padding(.horizontal,7).padding(.vertical,5).background(section == tab ? Color.white.opacity(0.12) : .clear,in:Capsule()) }.accessibilityLabel(tab).foregroundStyle(section == tab ? .white : .gray) }
+ ForEach(islandTabs,id:\.self) { tab in Button { model.section=tab } label: { HStack(spacing:4) { Image(systemName:tab == "Inicio" ? "square.grid.2x2.fill" : tab == "Archivos" ? "tray.fill" : "sparkles");if width>=600 { Text(tab) } }.padding(.horizontal,7).padding(.vertical,5).background(section == tab ? Color.white.opacity(0.12) : .clear,in:Capsule()) }.accessibilityLabel(tab).foregroundStyle(section == tab ? .white : .gray) }
  Spacer(minLength:0)
  Button { preferences.value.aiNotificationMode=preferences.value.aiNotificationMode.next } label: {
  Image(systemName:preferences.value.aiNotificationMode == .none ? "moon.fill" : preferences.value.aiNotificationMode == .visual ? "moon.stars.fill" : "moon")
@@ -60,10 +60,16 @@ import IslandCore
  if expanded {
  VStack(spacing:8) {
  if activity.latest != nil && section == "IA" { Button("Codex ha terminado · Abrir") { activity.openCodex() }.buttonStyle(.plain).font(.caption).foregroundStyle(.mint) }
- if section == "Archivos" { ShelfView(store:local,model:model,airDrop:airDrop) }
+ if section == "Archivos",preferences.value.filesEnabled { ShelfView(store:local,model:model,airDrop:airDrop) }
  else if section == "Inicio" { HomeView(model:model,music:music,calendar:calendar,preferences:preferences,usage:usage,activity:activity,openCodex:{ selectedAI=$0;model.section="IA" }).frame(maxWidth:.infinity,maxHeight:.infinity) }
  else if section == "IA" { AIUsageView(usage:usage,activity:activity,statistics:statistics,selected:$selectedAI) }
- else { VStack(spacing:8) { Image(systemName:section == "Codex" ? "terminal" : "music.note").font(.largeTitle); Text(section == "Codex" ? "Conecta Codex desde Ajustes" : "Conecta Apple Music y Calendario desde Ajustes").foregroundStyle(.secondary) }.frame(maxWidth:.infinity,maxHeight:.infinity) }
+ else if section == "Archivos" {
+  VStack(spacing:8) {
+   Image(systemName:"tray").font(.largeTitle)
+   Text("Activa la bandeja de archivos en Ajustes → Módulos").foregroundStyle(.secondary)
+  }.frame(maxWidth:.infinity,maxHeight:.infinity)
+ }
+ else { VStack(spacing:8) { Image(systemName:section == "Codex" ? "terminal" : "music.note").font(.largeTitle);Text(section == "Codex" ? "Conecta Codex desde Ajustes" : "Conecta Apple Music y Calendario desde Ajustes").foregroundStyle(.secondary) }.frame(maxWidth:.infinity,maxHeight:.infinity) }
  if let message=local.message { Text(message).font(.caption).foregroundStyle(.orange) }
  }.padding(.horizontal,18).padding(.top,8).padding(.bottom,12).frame(maxHeight:.infinity)
  .transition(.opacity.combined(with:.scale(scale:reduced ? 1 : 0.96,anchor:.top)))
@@ -91,5 +97,11 @@ import IslandCore
  Button("Salir de Isla") { NSApp.terminate(nil) }
  }
  .onExitCommand { model.close() }
+ .onChange(of:preferences.value.filesEnabled) { _, enabled in
+  if !enabled, model.section == "Archivos" { model.section = "Inicio" }
+ }
+ }
+ private var islandTabs:[String] {
+  preferences.value.filesEnabled ? ["Inicio","Archivos","IA"] : ["Inicio","IA"]
  }
 }

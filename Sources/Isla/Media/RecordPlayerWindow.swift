@@ -66,19 +66,26 @@ private final class RecordPlayerDesktopPanel: NSPanel {
     }
 
     func restoreDesktop() {
-        if presentation.desktopEnabled { showDesktop() }
+        applyDesktopEnabled(preferences.value.recordDesktopEnabled)
     }
 
-    func toggleDesktop() {
-        if presentation.desktopEnabled {
+    /// Keeps the desktop panel in sync with Ajustes → Módulos.
+    func applyDesktopEnabled(_ enabled: Bool) {
+        if enabled {
+            if desktopWindow == nil { showDesktop() }
+            if desktopWindow != nil { presentation.setDesktopEnabled(true) }
+            else { presentation.setDesktopEnabled(false) }
+        } else {
             desktopWindow?.saveFrame(usingName: desktopFrameName)
             desktopWindow?.close()
             desktopWindow = nil
             presentation.setDesktopEnabled(false)
-        } else {
-            showDesktop()
-            if desktopWindow != nil { presentation.setDesktopEnabled(true) }
         }
+    }
+
+    func toggleDesktop() {
+        applyDesktopEnabled(!presentation.desktopEnabled)
+        preferences.value.recordDesktopEnabled = presentation.desktopEnabled
     }
 
     private func showDesktop() {

@@ -50,8 +50,9 @@ Abre Isla desde su icono de la barra de menús y entra en **Ajustes**. En la isl
 
 | Función | Configuración y permiso |
 | --- | --- |
+| Funciones | En **Ajustes → Módulos → Funciones**: interruptores para Apple Music, **EQ con IA**, Calendario, bandeja de archivos, tocadiscos en el escritorio y efecto de tapa. |
 | Música | Activa Apple Music. Concede **Automatización → Music**. |
-| EQ con IA | En **Ajustes → Módulos → Música**: interruptor **EQ con IA** y keys de Claude/ChatGPT (llavero). También con el estilo **Claude** del tocadiscos. Orden: OAuth Claude Code → key Claude → key ChatGPT. |
+| EQ con IA | Interruptor **EQ con IA** en Funciones; keys de Claude/ChatGPT en **Música e IA EQ** (llavero). También con el estilo **Claude** del tocadiscos. Orden: OAuth Claude Code → key Claude → key ChatGPT. |
 | Tocadiscos | Pulsa el disco junto a la luna. El botón verde lo abre a pantalla completa. Sobre el vinilo, arrastra o desliza dos dedos a la izquierda para avanzar y a la derecha para retroceder. Mantén pulsado ⌘ para ver los diez ambientes. El fader vertical ajusta el volumen de Música. Si la salida Bluetooth publica su batería, el porcentaje aparece junto a ⌘. Gira los mandos para ajustar el ecualizador o pulsa la flecha circular sobre ellos para volver a sonido plano. La primera vez, activa Isla en **Accesibilidad** y vuelve a girar el mando. |
 | Archivos | Arrastra archivos de Finder al notch para abrir la bandeja. Suelta en la bandeja para guardar un acceso al original, o en AirDrop para elegir un destinatario. Arrastra un archivo desde la bandeja para usarlo en otra app. |
 | Añadir a playlist | En **Inicio**, pulsa el icono de lista con un signo + al lado de los controles de la canción. También está en el tocadiscos junto a ⌘. Elige una playlist editable de Música. Para algunas canciones del catálogo, Isla usa la ventana principal de Música y el permiso de **Accesibilidad**. |

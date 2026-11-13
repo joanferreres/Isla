@@ -201,7 +201,8 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
 
  func draggingEntered(_ sender:any NSDraggingInfo) -> NSDragOperation { draggingUpdated(sender) }
  func draggingUpdated(_ sender:any NSDraggingInfo) -> NSDragOperation {
- guard sender.draggingSourceOperationMask.contains(.copy),
+ guard preferences.value.filesEnabled,
+       sender.draggingSourceOperationMask.contains(.copy),
        sender.draggingPasteboard.availableType(from:[.fileURL]) != nil,
        let point=fileDropPoint(sender) else { return [] }
  model.trackFileDrop(at:point)

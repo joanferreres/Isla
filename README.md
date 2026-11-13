@@ -9,14 +9,17 @@ Isla convierte el notch del Mac en un espacio compacto para música, calendario,
 ## Vista rápida
 
 <p>
-<img src="docs/media/feature-notch.jpg" width="520" alt="Isla en el notch del Mac">
+<img src="docs/media/feature-notch.png" width="520" alt="Isla abierta bajo el notch">
 </p>
 
 <p>
-<img src="docs/media/feature-turntable.jpg" width="280" alt="Tocadiscos a pantalla completa">
-<img src="docs/media/feature-changer.png" width="280" alt="Selector de discos del tocadiscos">
-<img src="docs/media/feature-eq.png" width="280" alt="Ecualizador y mesa del tocadiscos">
-<img src="docs/media/feature-settings-ai-eq.jpg" width="280" alt="Ajustes: EQ con IA y API keys">
+<img src="docs/media/feature-turntable.png" width="360" alt="Tocadiscos de Isla">
+<img src="docs/media/feature-settings.png" width="280" alt="Ajustes: interruptores de funciones y EQ con IA">
+</p>
+
+<p>
+<img src="docs/media/feature-changer.png" width="220" alt="Selector de discos">
+<img src="docs/media/feature-eq.png" width="220" alt="Mandos Graves/Medios/Agudos">
 </p>
 
 ## Funciones
@@ -37,11 +40,11 @@ Isla convierte el notch del Mac en un espacio compacto para música, calendario,
 - Estilo **Claude**: auto-EQ según el tipo de música (Claude o ChatGPT).
 - Playlist, aleatorio, widget nativo y tocadiscos compacto en el escritorio.
 
-### EQ con IA
+### EQ con IA y toggles de funciones
 
-- En el tocadiscos, el menú de estilo incluye **Claude** para activar el auto-EQ.
-- En **Ajustes → Módulos → Música**: interruptor **EQ con IA** y campos seguros para API keys de **Claude** y **ChatGPT** (llavero de macOS).
-- Orden de autenticación: OAuth de Claude Code → key Claude → key ChatGPT (o variables `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
+- En **Ajustes → Módulos → Funciones**: interruptores para Apple Music, **EQ con IA**, Calendario, bandeja de archivos, tocadiscos en el escritorio y efecto de tapa.
+- En el tocadiscos, el menú de estilo incluye **Claude** (respeta el interruptor de EQ con IA).
+- API keys de **Claude** y **ChatGPT** en el llavero (orden: OAuth Claude Code → key Claude → key ChatGPT, o `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
 
 ### Calendario, IA, archivos y tapa
 
@@ -95,7 +98,7 @@ Sustitución manual: sal de Isla → descarga el ZIP → reemplaza la app en Apl
 
 ## Versión actual
 
-**Isla 0.8.71** (compilación 101).
+**Isla 0.8.72** (compilación 102).
 
 Artefactos de release esperados: `Isla.zip` + `SHA256SUMS.txt`. Firma: identidad personal `Isla Personal Code Signing` (Team ID vacío; **sin notarización**). Gatekeeper puede pedir «Abrir igualmente».
 

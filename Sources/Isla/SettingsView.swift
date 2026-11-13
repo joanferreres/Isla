@@ -1,9 +1,25 @@
 import SwiftUI
 import IslandCore
-private enum SettingsPage:String,CaseIterable,Identifiable {
+enum SettingsPage:String,CaseIterable,Identifiable {
  case general="General",modules="Módulos",ai="IA",displays="Pantallas",effects="Efectos"
  var id:String { rawValue }
  var symbol:String { switch self { case .general:return "gearshape";case .modules:return "square.grid.2x2";case .ai:return "sparkles";case .displays:return "display.2";case .effects:return "laptopcomputer" } }
+ static func from(query:String?) -> SettingsPage {
+ guard let query else { return .general }
+ let value=query.split(separator:"&").compactMap { part -> String? in
+  let kv=part.split(separator:"=",maxSplits:1).map(String.init)
+  guard kv.count == 2, kv[0] == "page" || kv[0] == "tab" else { return nil }
+  return kv[1].lowercased()
+ }.first
+ switch value {
+ case "modulos","modules","musica","music": return .modules
+ case "ia","ai": return .ai
+ case "pantallas","displays": return .displays
+ case "efectos","effects": return .effects
+ case "general": return .general
+ default: return .general
+ }
+ }
 }
 @MainActor struct SettingsView: View {
  @ObservedObject var calendar:CalendarService
@@ -14,7 +30,11 @@ private enum SettingsPage:String,CaseIterable,Identifiable {
  @ObservedObject var lid:LidEffectController
  @ObservedObject var updates:AppUpdateService
  @ObservedObject var store:PreferencesStore
- @State private var page=SettingsPage.general
+ @State private var page:SettingsPage
+ init(calendar:CalendarService,music:AppleMusicService,usage:CodexUsageService,activity:CodexActivityService,screenshots:ScreenshotService,lid:LidEffectController,updates:AppUpdateService,store:PreferencesStore,page:SettingsPage = .general) {
+  self.calendar=calendar;self.music=music;self.usage=usage;self.activity=activity;self.screenshots=screenshots;self.lid=lid;self.updates=updates;self.store=store
+  _page=State(initialValue:page)
+ }
  var body:some View {
  VStack(spacing:0) {
  HStack(spacing:8) {
@@ -70,6 +90,35 @@ private enum SettingsPage:String,CaseIterable,Identifiable {
  private var modules:some View {
  Group {
  Section {
+ Toggle("Apple Music",isOn:$store.value.musicEnabled)
+ Toggle("EQ con IA",isOn:$store.value.musicClaudeEQEnabled).disabled(!store.value.musicEnabled)
+ Toggle("Calendario",isOn:$store.value.calendarEnabled)
+ Toggle("Bandeja de archivos",isOn:$store.value.filesEnabled)
+ Toggle("Tocadiscos en el escritorio",isOn:$store.value.recordDesktopEnabled)
+ Toggle("Efecto al cerrar la tapa",isOn:$store.value.lidEffectEnabled)
+ Text("Activa o desactiva las funciones principales. Codex, Cursor y Claude se configuran en la pestaña IA.").font(.caption).foregroundStyle(.secondary)
+ } header: { Label("Funciones",systemImage:"switch.2") }
+ Section {
+ Text("Carátula, canción actual y controles de reproducción.").font(.caption).foregroundStyle(.secondary)
+ if let error=music.error { Text(error).font(.caption).foregroundStyle(.orange) }
+ Text("Con EQ con IA, al cambiar de canción se estima el género y se aplica un preset o Graves/Medios/Agudos. También con el estilo «Claude» del tocadiscos.").font(.caption).foregroundStyle(.secondary)
+ MusicAIEQKeySetup(enabled: store.value.musicClaudeEQEnabled && store.value.musicEnabled)
+ } header: { Label("Música e IA EQ",systemImage:"music.note") }
+ Section {
+ if let error=calendar.error { Text(error).font(.caption).foregroundStyle(.orange) }
+ if calendar.enabled {
+ if calendar.calendars.isEmpty { Text("Los calendarios aparecerán al conceder acceso.").font(.caption).foregroundStyle(.secondary) }
+ ForEach(calendar.calendars) { choice in
+ Toggle(choice.title,isOn:calendarBinding(choice.id))
+ }
+ } else { Text("Activa Calendario arriba para consultar eventos sin modificarlos.").font(.caption).foregroundStyle(.secondary) }
+ Button("Probar recordatorio (8 s)") { calendar.previewReminder() }.disabled(!calendar.enabled)
+ Text("El próximo evento aparece en los laterales durante los diez minutos anteriores a su inicio.").font(.caption).foregroundStyle(.secondary)
+ } header: { Label("Calendarios visibles",systemImage:"calendar") }
+ Section {
+ Text("Arrastra archivos al notch para la bandeja o AirDrop. Desactiva «Bandeja de archivos» si no quieres esa pestaña.").font(.caption).foregroundStyle(.secondary)
+ } header: { Label("Archivos",systemImage:"tray") }
+ Section {
  Toggle("Gestionar capturas",isOn:$store.value.screenshotsEnabled)
  Toggle("Copiar cada captura al portapapeles",isOn:$store.value.screenshotClipboardEnabled).disabled(!store.value.screenshotsEnabled)
  Button("Guardar en Escritorio/capturas") {
@@ -77,30 +126,9 @@ private enum SettingsPage:String,CaseIterable,Identifiable {
  catch { screenshots.error="No se pudo configurar la carpeta de capturas." }
  }
  Button("Abrir carpeta de capturas") { NSWorkspace.shared.open(screenshots.folder) }
- Text("Las capturas se guardan en Escritorio/capturas y puedes pegarlas con ⌘V. No se añaden al notch. Se copian sin esperar la miniatura flotante de macOS. La carpeta cambia el destino de las capturas de macOS; al desactivar la integración se conserva ese destino.").font(.caption).foregroundStyle(.secondary)
+ Text("Las capturas se guardan en Escritorio/capturas y puedes pegarlas con ⌘V. No se añaden al notch.").font(.caption).foregroundStyle(.secondary)
  if let error=screenshots.error { Text(error).font(.caption).foregroundStyle(.orange) }
  } header: { Label("Capturas",systemImage:"camera.viewfinder") }
- Section {
- Toggle("Conectar Apple Music",isOn:$store.value.musicEnabled)
- Text("Carátula, canción actual y controles de reproducción.").font(.caption).foregroundStyle(.secondary)
- if let error=music.error { Text(error).font(.caption).foregroundStyle(.orange) }
- Toggle("EQ con IA (música)",isOn:$store.value.musicClaudeEQEnabled)
-  .disabled(!store.value.musicEnabled)
- Text("Al cambiar de canción, la IA estima el género y aplica un preset o Graves/Medios/Agudos. También se activa con el estilo «Claude» del tocadiscos.").font(.caption).foregroundStyle(.secondary)
- MusicAIEQKeySetup(enabled: store.value.musicClaudeEQEnabled && store.value.musicEnabled)
- } header: { Label("Música",systemImage:"music.note") }
- Section {
- Toggle("Conectar Calendario",isOn:$store.value.calendarEnabled)
- if let error=calendar.error { Text(error).font(.caption).foregroundStyle(.orange) }
- if calendar.enabled {
- if calendar.calendars.isEmpty { Text("Los calendarios aparecerán al conceder acceso.").font(.caption).foregroundStyle(.secondary) }
- ForEach(calendar.calendars) { choice in
- Toggle(choice.title,isOn:calendarBinding(choice.id))
- }
- } else { Text("Consulta tus eventos sin modificarlos.").font(.caption).foregroundStyle(.secondary) }
- Button("Probar recordatorio (8 s)") { calendar.previewReminder() }.disabled(!calendar.enabled)
- Text("El próximo evento aparece en los laterales durante los diez minutos anteriores a su inicio.").font(.caption).foregroundStyle(.secondary)
- } header: { Label("Calendario",systemImage:"calendar") }
  }
  }
  private var ai:some View {

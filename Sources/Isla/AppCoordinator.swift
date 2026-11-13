@@ -27,6 +27,10 @@ import IslandCore
  if preferences.value.expandedWidth == 600 { preferences.value.expandedWidth=640 }
  UserDefaults.standard.set(true,forKey:"compactClickLayoutApplied")
  }
+ if !UserDefaults.standard.bool(forKey:"recordDesktopPreferenceMigrated") {
+ preferences.value.recordDesktopEnabled = UserDefaults.standard.bool(forKey:"recordPlayer.desktopEnabled")
+ UserDefaults.standard.set(true,forKey:"recordDesktopPreferenceMigrated")
+ }
  music.$state.sink { [weak self] state in self?.recordWidget.update(state) }.store(in:&integrationSubscriptions)
  activity.onCompletion = { [weak self] event in self?.statistics.record(event) }
  usage.onSnapshot = { [weak self] snapshot in self?.statistics.record(snapshot) }
@@ -55,6 +59,9 @@ import IslandCore
  if !value.aiVisualEnabled { self.activity.latest=nil }
  if old?.codexEnabled != value.codexEnabled { if value.codexEnabled { self.activity.connect();self.usage.connect() } else { self.activity.disconnect();self.usage.disconnect() } }
  if old?.lidEffectEnabled != value.lidEffectEnabled { if value.lidEffectEnabled { Task { await self.lid.enable(requestPermission:old != nil) } } else { self.lid.disable() } }
+ if old?.recordDesktopEnabled != value.recordDesktopEnabled {
+  self.recordPlayer.applyDesktopEnabled(value.recordDesktopEnabled)
+ }
  }.store(in:&integrationSubscriptions)
 
  let center=NSWorkspace.shared.notificationCenter
@@ -158,18 +165,28 @@ import IslandCore
  }
  @objc func openIsland() { displays?.open() }
  func application(_ application:NSApplication,open urls:[URL]) {
- if urls.contains(where: { $0.scheme == "isla" && $0.host == "tocadiscos" }) { openRecordPlayer() }
+  for url in urls where url.scheme == "isla" {
+   switch url.host?.lowercased() {
+   case "tocadiscos": openRecordPlayer()
+   case "ajustes","settings": showSettings(page: SettingsPage.from(query: url.query))
+   case "isla","open",.none: openIsland()
+   default: break
+   }
+  }
  }
  @objc func openRecordPlayer() { recordPlayer.show() }
- @objc private func toggleRecordDesktop() { recordPlayer.toggleDesktop() }
+ @objc private func toggleRecordDesktop() {
+  preferences.value.recordDesktopEnabled.toggle()
+ }
  @objc func openSettings() { showSettings() }
  @objc func quit() { NSApp.terminate(nil) }
- func showSettings() {
- if settings == nil {
- let window = NSWindow(contentRect: NSRect(x: 0,y: 0,width: 640,height: 480), styleMask: [.titled,.closable], backing: .buffered, defer: false)
- window.title = "Ajustes de Isla"; window.isReleasedWhenClosed = false
- window.contentView = NSHostingView(rootView: SettingsView(calendar:calendar,music:music,usage:usage,activity:activity,screenshots:screenshots,lid:lid,updates:updates,store: preferences)); window.center(); settings = window
- }
- NSApp.activate(ignoringOtherApps: true); settings?.makeKeyAndOrderFront(nil)
+ func showSettings(page: SettingsPage = .general) {
+  if settings == nil {
+   let window = NSWindow(contentRect: NSRect(x: 0,y: 0,width: 640,height: 480), styleMask: [.titled,.closable], backing: .buffered, defer: false)
+   window.title = "Ajustes de Isla"; window.isReleasedWhenClosed = false
+   window.center(); settings = window
+  }
+  settings?.contentView = NSHostingView(rootView: SettingsView(calendar:calendar,music:music,usage:usage,activity:activity,screenshots:screenshots,lid:lid,updates:updates,store:preferences,page:page))
+  NSApp.activate(ignoringOtherApps: true); settings?.makeKeyAndOrderFront(nil)
  }
 }
