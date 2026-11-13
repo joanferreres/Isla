@@ -13,6 +13,52 @@ actor MusicPlaylistService {
         }
     }
 
+    func currentCatalog() async throws -> MusicPlaylistCatalog {
+        guard let catalog = try await bridge.query("playlistTracks").playlistCatalog else {
+            throw MusicFailure(message: "Música no expone una playlist con canciones ahora mismo.")
+        }
+        return catalog
+    }
+
+    /// Active playlist when it has songs; otherwise upcoming / suggested next tracks.
+    /// Does not fall through to a random library sample while a playlist has tracks.
+    func changerCatalog() async throws -> MusicPlaylistCatalog {
+        if let catalog = try? await bridge.query("playlistTracks").playlistCatalog,
+           !catalog.tracks.isEmpty {
+            return catalog
+        }
+        if let catalog = try? await bridge.query("upcomingTracks").playlistCatalog,
+           !catalog.tracks.isEmpty {
+            return catalog
+        }
+        throw MusicFailure(message: "No hay canciones en la playlist ni próximas sugeridas.")
+    }
+
+    func playPlaylist(_ playlist: MusicPlaylist) async throws {
+        _ = try await bridge.query("playPlaylist", argument: playlist.id)
+    }
+
+    func shuffleEnabled() async throws -> Bool {
+        try await bridge.query("shuffleState").shuffleEnabled ?? false
+    }
+
+    /// Toggle Music’s shuffle mode only — does not restart or randomize the current queue.
+    @discardableResult
+    func setShuffle(_ enabled: Bool) async throws -> Bool {
+        try await bridge.query("setShuffle", argument: enabled ? "1" : "0").shuffleEnabled ?? enabled
+    }
+
+    func play(trackID: String) async throws {
+        let reply = try await bridge.query("playTrack", argument: trackID)
+        guard reply.artworkTrackID == trackID else {
+            throw MusicFailure(message: "Esa canción ya no está en la playlist de Música.")
+        }
+    }
+
+    func artwork(trackID: String) async throws -> Data? {
+        try await bridge.query("trackArtwork", argument: trackID).artwork(for: trackID)
+    }
+
     /// Returns false when the song was already in the selected playlist.
     func add(_ track: MediaSnapshot, to playlist: MusicPlaylist, unambiguousName: Bool) async throws -> Bool {
         let request = MusicPlaylistRequest(playlistID: playlist.id, track: track)

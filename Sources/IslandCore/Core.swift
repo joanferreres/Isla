@@ -27,6 +27,8 @@ public struct Preferences: Codable, Equatable {
  public var expandedWidth: Double = 640
  public var showOnAllDisplays = true
  public var musicEnabled = false
+ /// Auto-pick EQ from track genre via Claude (opt-out in Ajustes → Música).
+ public var musicClaudeEQEnabled = true
  public var calendarEnabled = false
  public var cursorEnabled = true
  public var claudeEnabled = true
@@ -48,13 +50,14 @@ public struct Preferences: Codable, Equatable {
  public var screenshotClipboardEnabled=true
  public var selectedCalendarIDs: [String] = []
  public init() {}
- enum CodingKeys: String, CodingKey { case cursorEnabled,claudeEnabled,showCursorOnHome,showClaudeOnHome,screenshotsEnabled,screenshotClipboardEnabled,notificationMode,moonModeEnabled,showCodexOnHome,reduceMotion,expandedWidth,showOnAllDisplays,musicEnabled,calendarEnabled,codexEnabled,lidEffectEnabled,completionSoundEnabled,selectedCalendarIDs }
+ enum CodingKeys: String, CodingKey { case cursorEnabled,claudeEnabled,showCursorOnHome,showClaudeOnHome,screenshotsEnabled,screenshotClipboardEnabled,notificationMode,moonModeEnabled,showCodexOnHome,reduceMotion,expandedWidth,showOnAllDisplays,musicEnabled,musicClaudeEQEnabled,calendarEnabled,codexEnabled,lidEffectEnabled,completionSoundEnabled,selectedCalendarIDs }
  public init(from decoder: Decoder) throws {
  let c = try decoder.container(keyedBy:CodingKeys.self)
  reduceMotion = try c.decodeIfPresent(Bool.self,forKey:.reduceMotion) ?? false
  expandedWidth = try c.decodeIfPresent(Double.self,forKey:.expandedWidth) ?? 640
  showOnAllDisplays = try c.decodeIfPresent(Bool.self,forKey:.showOnAllDisplays) ?? true
  musicEnabled = try c.decodeIfPresent(Bool.self,forKey:.musicEnabled) ?? false
+ musicClaudeEQEnabled = try c.decodeIfPresent(Bool.self,forKey:.musicClaudeEQEnabled) ?? true
  calendarEnabled = try c.decodeIfPresent(Bool.self,forKey:.calendarEnabled) ?? false
  showCodexOnHome = try c.decodeIfPresent(Bool.self,forKey:.showCodexOnHome) ?? true
  cursorEnabled = try c.decodeIfPresent(Bool.self,forKey:.cursorEnabled) ?? true

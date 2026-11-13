@@ -74,7 +74,7 @@ import IslandCore
  var body:some View {
  ScrollView {
  VStack(alignment:.leading,spacing:10) {
- HStack { AIAccountRing(service:service);Text(service.provider.title).font(.headline);Spacer();Button { Task { await service.refresh() } } label: { Image(systemName:"arrow.clockwise") }.buttonStyle(.plain).disabled(!service.enabled || service.loading).accessibilityLabel("Actualizar \(service.provider.title)") }
+ HStack { AIAccountRing(service:service);Text(service.provider.title).font(.headline);Spacer();Button { Task { await service.refresh(interactive:true) } } label: { Image(systemName:"arrow.clockwise") }.buttonStyle(.plain).disabled(!service.enabled || service.loading).accessibilityLabel("Actualizar \(service.provider.title)") }
  if service.provider == .claude { Text("Límites de Claude Code y de Claude con la misma cuenta").font(.caption).foregroundStyle(.secondary) }
  if !service.enabled { Text("Conecta \(service.provider.title) en Ajustes → IA.").foregroundStyle(.secondary) }
  if service.loading { ProgressView().controlSize(.small) }
@@ -104,11 +104,14 @@ import IslandCore
  Toggle("Mostrar \(service.provider.title) en Inicio",isOn:$showOnHome)
  if let error=service.error { Text(error).font(.caption).foregroundStyle(.orange) }
  if enabled {
- if service.provider == .claude && !service.accessRequested {
- Button("Permitir acceso a Claude") { Task { await service.refresh(interactive:true) } }.disabled(service.loading)
- Text("Se lee la sesión de Claude Code. La autorización se recuerda. No se volverá a pedir automáticamente.").font(.caption).foregroundStyle(.secondary)
+ if service.provider == .claude {
+ Button(service.accessRequested ? "Volver a conectar Claude" : "Permitir acceso a Claude") { Task { await service.refresh(interactive:true) } }.disabled(service.loading)
+ Text("Hace falta sesión OAuth de Claude Code («claude auth login»). Una API key no muestra límites. El acceso al llavero se puede volver a pedir aquí.").font(.caption).foregroundStyle(.secondary)
  }
- Button("Actualizar \(service.provider.title)") { Task { await service.refresh() } }.disabled(service.loading)
+ if service.provider == .cursor {
+ Text("Isla lee la sesión cifrada de la app Cursor; macOS puede pedir acceso a «Cursor Safe Storage».").font(.caption).foregroundStyle(.secondary)
+ }
+ Button("Actualizar \(service.provider.title)") { Task { await service.refresh(interactive:true) } }.disabled(service.loading)
  }
  } header: { Text(service.provider.title) }
  }

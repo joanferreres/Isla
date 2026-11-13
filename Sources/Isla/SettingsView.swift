@@ -84,6 +84,10 @@ private enum SettingsPage:String,CaseIterable,Identifiable {
  Toggle("Conectar Apple Music",isOn:$store.value.musicEnabled)
  Text("Carátula, canción actual y controles de reproducción.").font(.caption).foregroundStyle(.secondary)
  if let error=music.error { Text(error).font(.caption).foregroundStyle(.orange) }
+ Toggle("EQ con IA (música)",isOn:$store.value.musicClaudeEQEnabled)
+  .disabled(!store.value.musicEnabled)
+ Text("Al cambiar de canción, la IA estima el género y aplica un preset o Graves/Medios/Agudos. También se activa con el estilo «Claude» del tocadiscos.").font(.caption).foregroundStyle(.secondary)
+ MusicAIEQKeySetup(enabled: store.value.musicClaudeEQEnabled && store.value.musicEnabled)
  } header: { Label("Música",systemImage:"music.note") }
  Section {
  Toggle("Conectar Calendario",isOn:$store.value.calendarEnabled)
@@ -173,5 +177,120 @@ private enum SettingsPage:String,CaseIterable,Identifiable {
  store.value.selectedCalendarIDs=ids.isEmpty ? ["__none__"] : ids
  calendar.refresh()
  })
+ }
+}
+
+/// SecureFields for Claude + ChatGPT API keys used by music AI EQ (keychain).
+private struct MusicAIEQKeySetup: View {
+ let enabled: Bool
+ @State private var advisor = MusicClaudeEQService()
+ @State private var hasClaudeKey = false
+ @State private var hasOpenAIKey = false
+ @State private var claudeDraft = ""
+ @State private var openAIDraft = ""
+ @State private var status: String?
+ @State private var busy = false
+
+ var body: some View {
+ VStack(alignment: .leading, spacing: 10) {
+  Text("Las keys se guardan en el llavero de macOS (no en texto plano). Claude Code OAuth sigue teniendo prioridad si existe.")
+   .font(.caption)
+   .foregroundStyle(.secondary)
+
+  keyRow(
+   title: "Claude (Anthropic)",
+   placeholder: "sk-ant-…",
+   draft: $claudeDraft,
+   hasKey: hasClaudeKey,
+   saveLabel: "Guardar Claude",
+   onSave: {
+    try await advisor.saveClaudeAPIKey(claudeDraft)
+    claudeDraft = ""
+    hasClaudeKey = true
+    status = "API key de Claude guardada en el llavero."
+   },
+   onClear: {
+    await advisor.clearClaudeAPIKey()
+    hasClaudeKey = false
+    status = "API key de Claude eliminada."
+   }
+  )
+
+  keyRow(
+   title: "ChatGPT (OpenAI)",
+   placeholder: "sk-…",
+   draft: $openAIDraft,
+   hasKey: hasOpenAIKey,
+   saveLabel: "Guardar ChatGPT",
+   onSave: {
+    try await advisor.saveOpenAIAPIKey(openAIDraft)
+    openAIDraft = ""
+    hasOpenAIKey = true
+    status = "API key de ChatGPT guardada en el llavero."
+   },
+   onClear: {
+    await advisor.clearOpenAIAPIKey()
+    hasOpenAIKey = false
+    status = "API key de ChatGPT eliminada."
+   }
+  )
+
+  if let status {
+   Text(status).font(.caption2).foregroundStyle(.secondary)
+  }
+  Text("Orden: Claude OAuth → key Claude → key ChatGPT (o ANTHROPIC_API_KEY / OPENAI_API_KEY en el entorno).")
+   .font(.caption2)
+   .foregroundStyle(.secondary)
+ }
+ .opacity(enabled ? 1 : 0.55)
+ .task {
+  hasClaudeKey = await advisor.hasClaudeAPIKey()
+  hasOpenAIKey = await advisor.hasOpenAIAPIKey()
+ }
+ }
+
+ @ViewBuilder
+ private func keyRow(
+  title: String,
+  placeholder: String,
+  draft: Binding<String>,
+  hasKey: Bool,
+  saveLabel: String,
+  onSave: @escaping () async throws -> Void,
+  onClear: @escaping () async -> Void
+ ) -> some View {
+  VStack(alignment: .leading, spacing: 4) {
+   HStack {
+    Text(title).font(.caption.weight(.semibold))
+    Spacer()
+    Text(hasKey ? "En llavero" : "Sin key")
+     .font(.caption2)
+     .foregroundStyle(hasKey ? Color.secondary : Color.orange)
+   }
+   SecureField(placeholder, text: draft)
+    .textFieldStyle(.roundedBorder)
+    .disabled(busy)
+   HStack {
+    Button(busy ? "Guardando…" : saveLabel) {
+     Task {
+      busy = true
+      defer { busy = false }
+      do { try await onSave() }
+      catch { status = error.localizedDescription }
+     }
+    }
+    .disabled(busy || draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    if hasKey {
+     Button("Borrar", role: .destructive) {
+      Task {
+       busy = true
+       defer { busy = false }
+       await onClear()
+      }
+     }
+     .disabled(busy)
+    }
+   }
+  }
  }
 }

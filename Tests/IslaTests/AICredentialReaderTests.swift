@@ -19,6 +19,21 @@ import SQLite3
  XCTAssertEqual(request.value(forHTTPHeaderField:"Cookie"),"WorkosCursorSessionToken=account-fixture::\(token)")
  XCTAssertEqual(try Data(contentsOf:path),before)
  }
+ func testCursorDecryptsSafeStorageTokenWithProvidedPassword() async throws {
+ let home=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+ defer { try? FileManager.default.removeItem(at:home) }
+ let path=home.appendingPathComponent("Library/Application Support/Cursor/User/globalStorage/state.vscdb")
+ try FileManager.default.createDirectory(at:path.deletingLastPathComponent(),withIntermediateDirectories:true)
+ let sealed="cursor-safe-storage:v1:djEww03mXiOogQVLP8swh7hQqtqlBH7lTtLbkPi9LvYgD+T/p309ZcP2xQuH6COtTRyO"
+ let plain="fixture.eyJzdWIiOiJmaXh0dXJlLWFjY291bnQifQ.sig"
+ var db:OpaquePointer?
+ XCTAssertEqual(sqlite3_open(path.path,&db),SQLITE_OK)
+ let sql="CREATE TABLE ItemTable (key TEXT PRIMARY KEY,value TEXT); INSERT INTO ItemTable VALUES ('cursorAuth/accessToken','\(sealed)'); INSERT INTO ItemTable VALUES ('cursorAuth/stripeMembershipAuthId','fixture-account');"
+ XCTAssertEqual(sqlite3_exec(db,sql,nil,nil,nil),SQLITE_OK)
+ sqlite3_close(db)
+ let request=try await AICredentialReader().request(.cursor,interactive:false,home:home,cursorSafePassword:"isla-fixture-password")
+ XCTAssertEqual(request.value(forHTTPHeaderField:"Cookie"),"WorkosCursorSessionToken=fixture-account::\(plain)")
+ }
  func testMissingCursorSessionFailsWithoutCreatingStore() async throws {
  let home=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
  do { _=try await AICredentialReader().request(.cursor,interactive:false,home:home);XCTFail("Missing session should not produce a request") } catch { XCTAssertFalse(FileManager.default.fileExists(atPath:home.path)) }
@@ -47,5 +62,15 @@ import SQLite3
  try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
  try JSONSerialization.data(withJSONObject:["claudeAiOauth":["accessToken":"expired-fixture","expiresAt":1]]).write(to:directory.appendingPathComponent(".credentials.json"))
  do { _=try await AICredentialReader().request(.claude,interactive:false,home:home);XCTFail("Expired token must be rejected") } catch { XCTAssertTrue(error.localizedDescription.contains("ha caducado"));XCTAssertFalse(error.localizedDescription.contains("Permitir acceso")) }
+ }
+ func testEmptyOAuthTokenExplainsAPIKeyIsNotEnough() async throws {
+ let home=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+ defer { try? FileManager.default.removeItem(at:home) }
+ let directory=home.appendingPathComponent(".claude")
+ try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
+ try JSONSerialization.data(withJSONObject:["claudeAiOauth":["accessToken":"","expiresAt":0]]).write(to:directory.appendingPathComponent(".credentials.json"))
+ do { _=try await AICredentialReader().request(.claude,interactive:false,home:home);XCTFail("Empty OAuth must fail") } catch {
+  XCTAssertTrue(error.localizedDescription.contains("API key") || error.localizedDescription.contains("claude auth login"))
+ }
  }
 }

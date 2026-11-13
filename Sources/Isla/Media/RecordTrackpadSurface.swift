@@ -1,16 +1,21 @@
 import AppKit
 import SwiftUI
+import IslandCore
 
-/// Listens only to precise scrolling that starts over the record in its own window.
+/// Precise trackpad input over the platter: pan for disc changes, torque/rotate for spinning.
 struct RecordTrackpadSurface: NSViewRepresentable {
-    let update: (CGSize) -> Void
-    let finish: (CGSize?) -> Void
+    var enabled: Bool
+    var onScroll: (_ dx: CGFloat, _ dy: CGFloat, _ locationInView: CGPoint) -> Void
+    var onRotate: (_ degrees: Double) -> Void
+    var onFinish: (_ cancelled: Bool) -> Void
 
     func makeNSView(context: Context) -> Surface { Surface() }
 
     func updateNSView(_ view: Surface, context: Context) {
-        view.update = update
-        view.finish = finish
+        view.enabled = enabled
+        view.onScroll = onScroll
+        view.onRotate = onRotate
+        view.onFinish = onFinish
     }
 
     static func dismantleNSView(_ view: Surface, coordinator: ()) {
@@ -18,10 +23,12 @@ struct RecordTrackpadSurface: NSViewRepresentable {
     }
 
     final class Surface: NSView {
-        var update: ((CGSize) -> Void)?
-        var finish: ((CGSize?) -> Void)?
+        var enabled = true
+        var onScroll: ((CGFloat, CGFloat, CGPoint) -> Void)?
+        var onRotate: ((Double) -> Void)?
+        var onFinish: ((Bool) -> Void)?
         private var monitor: Any?
-        private var distance: CGSize?
+        private var active = false
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
@@ -33,41 +40,82 @@ struct RecordTrackpadSurface: NSViewRepresentable {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             guard window != nil, monitor == nil else { return }
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .rotate]) { [weak self] event in
                 self?.handle(event)
                 return event
             }
         }
 
         func stop() {
+            if active {
+                active = false
+                onFinish?(true)
+            }
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
-            distance = nil
         }
 
         private func handle(_ event: NSEvent) {
-            guard let window, event.window === window,
-                  event.hasPreciseScrollingDeltas, event.momentumPhase.isEmpty else { return }
-            if event.phase.contains(.began) || event.phase.contains(.mayBegin) || distance == nil {
+            guard enabled, let window, event.window === window else { return }
+            // Selector on the left edge claims two-finger input while turning.
+            if RecordGestureClaim.selectorActive {
+                if active {
+                    active = false
+                    onFinish?(true)
+                }
+                return
+            }
+            if event.type == .rotate {
+                handleRotate(event)
+                return
+            }
+            handleScroll(event)
+        }
+
+        private func handleRotate(_ event: NSEvent) {
+            let point = convert(event.locationInWindow, from: nil)
+            let inside = hypot(point.x - bounds.midX, point.y - bounds.midY) <= bounds.width / 2
+            if event.phase.contains(.began) || event.phase.contains(.mayBegin) {
+                active = inside
+            }
+            guard active else { return }
+            if event.phase.contains(.cancelled) {
+                active = false
+                onFinish?(true)
+                return
+            }
+            let degrees = Double(event.rotation)
+            if degrees != 0 { onRotate?(degrees) }
+            if event.phase.contains(.ended) {
+                active = false
+                onFinish?(false)
+            }
+        }
+
+        private func handleScroll(_ event: NSEvent) {
+            guard event.hasPreciseScrollingDeltas, event.momentumPhase.isEmpty else { return }
+            if event.phase.contains(.began) || event.phase.contains(.mayBegin) || !active {
                 let point = convert(event.locationInWindow, from: nil)
                 let inside = hypot(point.x - bounds.midX, point.y - bounds.midY) <= bounds.width / 2
-                distance = inside ? .zero : nil
+                if !active { active = inside }
+                if event.phase.contains(.began) || event.phase.contains(.mayBegin) {
+                    active = inside
+                }
             }
-            guard var distance else { return }
+            guard active else { return }
             if event.phase.contains(.cancelled) {
-                self.distance = nil
-                finish?(nil)
+                active = false
+                onFinish?(true)
                 return
             }
             let direction: CGFloat = event.isDirectionInvertedFromDevice ? 1 : -1
-            distance.width += direction * event.scrollingDeltaX
-            distance.height += direction * event.scrollingDeltaY
+            let dx = direction * event.scrollingDeltaX
+            let dy = direction * event.scrollingDeltaY
+            let point = convert(event.locationInWindow, from: nil)
+            if dx != 0 || dy != 0 { onScroll?(dx, dy, point) }
             if event.phase.contains(.ended) {
-                self.distance = nil
-                finish?(distance)
-            } else {
-                self.distance = distance
-                update?(distance)
+                active = false
+                onFinish?(false)
             }
         }
     }

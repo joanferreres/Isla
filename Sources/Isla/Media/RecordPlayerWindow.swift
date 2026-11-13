@@ -125,13 +125,17 @@ private final class RecordPlayerDesktopPanel: NSPanel {
         window.collectionBehavior = [.fullScreenPrimary, .managed]
         window.appearance = NSAppearance(named: .darkAqua)
         window.titlebarAppearsTransparent = true
+        window.isOpaque = true
         window.backgroundColor = presentation.palette.background
         window.selectPalette = { [weak presentation] in presentation?.select($0) }
         presentation.onPaletteChange = { [weak window] in window?.backgroundColor = $0.background }
         window.delegate = self
-        window.contentView = NSHostingView(rootView: RecordPlayerView(
+        let hosting = IslandHostingView(rootView: RecordPlayerView(
             music: music, preferences: preferences, presentation: presentation
         ))
+        // Clip the peek disc at the content edge so only the inner blank half is visible.
+        hosting.clipsToBounds = true
+        window.contentView = hosting
         window.center()
         window.setFrameAutosaveName("IslaRecordPlayer")
         self.window = window
