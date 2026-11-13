@@ -14,6 +14,8 @@ actor CodexCredentialReader {
  @Published var loading=false
  @Published var enabled=false
  @Published var stale=false
+ /// Notch only shows Codex after Ajustes returns a successful usage snapshot.
+ var notchReady:Bool { enabled && snapshot != nil }
  let credentials=CodexCredentialReader()
  var timer:Timer?
  var generation=0
@@ -27,7 +29,7 @@ actor CodexCredentialReader {
  timer=Timer.scheduledTimer(withTimeInterval:delay,repeats:false) { [weak self] _ in Task { @MainActor in await self?.refresh() } }
  timer?.tolerance=min(30,delay*0.1)
  }
- func disconnect() { enabled=false;generation += 1;timer?.invalidate();timer=nil;loading=false;stale=snapshot != nil }
+ func disconnect() { enabled=false;generation += 1;timer?.invalidate();timer=nil;loading=false;stale=snapshot != nil;if !stale { snapshot=nil;error=nil } }
  func refresh() async {
  guard enabled,!loading else { return };loading=true;defer{loading=false;if enabled { scheduleNext() }};let g=generation
  do {

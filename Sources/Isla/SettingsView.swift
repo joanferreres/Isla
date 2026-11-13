@@ -139,8 +139,11 @@ enum SettingsPage:String,CaseIterable,Identifiable {
  VStack(alignment:.leading,spacing:4) { Text("Codex").font(.headline);Text(usage.enabled ? "Conectado a tu sesión de Codex" : "Usa tu sesión de Codex en este Mac").font(.caption).foregroundStyle(.secondary) }
  }
  Toggle("Conectar Codex",isOn:$store.value.codexEnabled)
- Toggle("Mostrar Codex en Inicio",isOn:$store.value.showCodexOnHome)
- Text("El anillo rodea el logo y muestra el porcentaje consumido de la ventana corta. Pulsa en Inicio para ver los límites y sus reinicios.").font(.caption).foregroundStyle(.secondary)
+ Toggle("Mostrar Codex en Inicio",isOn:$store.value.showCodexOnHome).disabled(!usage.notchReady)
+ Text("El anillo rodea el logo y muestra el porcentaje consumido de la ventana corta. Solo aparece en el notch cuando la consulta de límites funciona.").font(.caption).foregroundStyle(.secondary)
+ if !usage.notchReady,store.value.codexEnabled {
+ Text("Codex no se muestra en el notch hasta que Actualizar devuelva límites.").font(.caption).foregroundStyle(.secondary)
+ }
  if let error=usage.error { Text(error).font(.caption).foregroundStyle(.orange) }
  if usage.enabled {
  HStack { Text(usage.stale ? "Última lectura guardada" : "Uso de la cuenta").font(.caption).foregroundStyle(.secondary);Spacer();Button("Actualizar") { Task { await usage.refresh() } }.disabled(usage.loading) }

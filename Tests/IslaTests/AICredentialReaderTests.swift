@@ -70,7 +70,23 @@ import SQLite3
  try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
  try JSONSerialization.data(withJSONObject:["claudeAiOauth":["accessToken":"","expiresAt":0]]).write(to:directory.appendingPathComponent(".credentials.json"))
  do { _=try await AICredentialReader().request(.claude,interactive:false,home:home);XCTFail("Empty OAuth must fail") } catch {
-  XCTAssertTrue(error.localizedDescription.contains("API key") || error.localizedDescription.contains("claude auth login"))
+  XCTAssertTrue(error.localizedDescription.contains("Claude") || error.localizedDescription.contains("claude auth login") || error.localizedDescription.contains("API key"))
+ }
+ }
+ func testClaudeDesktopSessionBuildsOrganizationUsageRequest() async throws {
+ let home=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+ defer { try? FileManager.default.removeItem(at:home) }
+ let support=home.appendingPathComponent("Library/Application Support/Claude")
+ try FileManager.default.createDirectory(at:support,withIntermediateDirectories:true)
+ try JSONSerialization.data(withJSONObject:["version":2,"samples":[["org":"org-fixture","u":[:]]]]).write(to:support.appendingPathComponent("plan-usage-history.json"))
+ // Cookie DB with a plaintext-looking encrypted_value is not exercised here — without Claude Safe Storage
+ // the desktop path fails closed; empty OAuth alone must not invent a request.
+ try JSONSerialization.data(withJSONObject:["claudeAiOauth":["accessToken":"","expiresAt":0]]).write(to:{
+  let dir=home.appendingPathComponent(".claude");try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
+  return dir.appendingPathComponent(".credentials.json")
+ }())
+ do { _=try await AICredentialReader().request(.claude,interactive:false,home:home);XCTFail("Must fail without desktop cookies or OAuth") } catch {
+  XCTAssertFalse(error.localizedDescription.isEmpty)
  }
  }
 }

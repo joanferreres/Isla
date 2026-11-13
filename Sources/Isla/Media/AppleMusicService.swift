@@ -114,7 +114,8 @@ import IslandCore
     }
 
     func refresh() async {
-        guard enabled, !refreshing else { return }
+        // -1743 stays latched until disconnect()/connect() so we do not spam Music.
+        guard enabled, !refreshing, !permissionDenied else { return }
         refreshing = true
         defer { refreshing = false }
         let current = generation

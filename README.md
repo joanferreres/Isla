@@ -50,7 +50,7 @@ Isla convierte el notch del Mac en un espacio compacto para música, calendario,
 ### Calendario, IA, archivos y tapa
 
 - Calendario del día, recordatorio previo al próximo evento.
-- Límites de Codex, Cursor y Claude Code en Inicio.
+- Límites de Codex, Cursor y Claude en Inicio (solo si la consulta funciona; si no, se ocultan hasta Ajustes → IA).
 - Bandeja de archivos y AirDrop desde el notch.
 - Efecto opcional al cerrar la tapa (MacBook con sensor).
 
@@ -70,7 +70,7 @@ Concede solo lo que uses. Ruta base: **Ajustes del Sistema → Privacidad y segu
 | **Accesibilidad** | Privacidad y seguridad → Accesibilidad → activa **Isla** | Mandos Graves/Medios/Agudos, cambio de presets en la ventana EQ de Música, y añadir canciones del catálogo a playlists. |
 | **Calendarios** | Privacidad y seguridad → Calendarios | Eventos del día y recordatorio previo. Isla solo lee. |
 | **Grabación de pantalla** | Privacidad y seguridad → Grabación de pantalla y de sistema | Solo el efecto visual al cerrar la tapa. No guarda vídeo. |
-| **Llavero** | Diálogo de macOS al conectar Claude/Cursor o al guardar API keys | Leer sesión OAuth de Claude Code / Cursor Safe Storage; guardar keys de Claude y ChatGPT para el EQ con IA. |
+| **Llavero** | Diálogo de macOS al conectar Claude/Cursor o al guardar API keys | Leer sesión de Claude Desktop («Claude Safe Storage») u OAuth de Claude Code / Cursor Safe Storage; guardar keys de Claude y ChatGPT para el EQ con IA. |
 | **Archivos / capturas** (opcional) | Al activar capturas en Ajustes | Guardar en `Escritorio/capturas` y copiar al portapapeles. |
 
 ### Pasos claros (checklist)
@@ -99,7 +99,7 @@ Sustitución manual: sal de Isla → descarga el ZIP → reemplaza la app en Apl
 
 ## Versión actual
 
-**Isla 0.8.75** (compilación 105).
+**Isla 0.8.76** (compilación 106).
 
 Artefactos de release esperados: `Isla.zip` + `SHA256SUMS.txt`. Firma: identidad personal `Isla Personal Code Signing` (Team ID vacío; **sin notarización**). Gatekeeper puede pedir «Abrir igualmente».
 

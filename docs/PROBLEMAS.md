@@ -52,7 +52,7 @@ Activa Calendario, revisa el permiso y los calendarios seleccionados. Si lo has 
 
 ## No aparecen límites de una IA
 
-Debes iniciar sesión con tu propia cuenta en la aplicación correspondiente y activar la conexión. macOS puede pedir acceso al **llavero** (Claude Code-credentials / Cursor Safe Storage): acéptalo o Isla no podrá leer la sesión. Una sesión caducada o un cambio del servicio puede impedir la lectura. No envíes tokens, archivos de autenticación ni contraseñas para pedir ayuda.
+Debes iniciar sesión con tu propia cuenta en la aplicación correspondiente y activar la conexión. macOS puede pedir acceso al **llavero** (Claude Safe Storage / Claude Code-credentials / Cursor Safe Storage): acéptalo o Isla no podrá leer la sesión. Una sesión caducada o un cambio del servicio puede impedir la lectura. Codex, Cursor y Claude **solo se muestran en el notch** cuando la consulta de límites funciona; hasta entonces configúralos en **Ajustes → IA**. No envíes tokens, archivos de autenticación ni contraseñas para pedir ayuda.
 
 ## El efecto de tapa no aparece
 

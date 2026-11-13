@@ -139,14 +139,60 @@ actor AICredentialReader {
    request.setValue("oauth-2025-04-20",forHTTPHeaderField:"anthropic-beta")
    return request
   }
+  let expiredOAuth:Bool={
+   guard let data,let oauth=claudeOAuthPayload(data),!oauth.empty else { return false }
+   return oauth.expiry<=Date()
+  }()
   // Empty/expired Claude Code-credentials (common when Claude Code uses ANTHROPIC_API_KEY only).
   if data != nil { forgetClaude() }
+  // Claude Desktop session cookie → organization usage (no Claude Code OAuth needed).
+  if let desktop=try? claudeDesktopUsageRequest(interactive:interactive,home:home) { return desktop }
+  if expiredOAuth {
+   throw MusicFailure(message:"La sesión OAuth de Claude Code ha caducado. Abre Claude Code o ejecuta «claude auth login», o inicia sesión en la app Claude.")
+  }
   if anthropicAPIKey() != nil {
-   throw MusicFailure(message:"Claude Code está con API key (sin OAuth). El EQ funciona; para ver límites en Isla ejecuta «claude auth login».")
+   throw MusicFailure(message:"Claude Code está con API key (sin OAuth) y no hay sesión usable de la app Claude. El EQ funciona; para límites en Isla: «claude auth login» o inicia sesión en Claude Desktop.")
   }
   throw MusicFailure(message:interactive
-   ? "No hay sesión OAuth de Claude Code ni API key. Ejecuta «claude auth login» o pega una key sk-ant- en Ajustes → Música."
-   : "No hay sesión OAuth de Claude Code. Pulsa «Permitir acceso a Claude», ejecuta «claude auth login», o pega una API key en Ajustes → Música.")
+   ? "No hay sesión de Claude. Ejecuta «claude auth login», inicia sesión en la app Claude (permitir «Claude Safe Storage»), o pega una key sk-ant- en Ajustes → Música."
+   : "No hay sesión de Claude. Pulsa «Permitir acceso a Claude» en Ajustes → IA, o inicia sesión en la app Claude / «claude auth login».")
+ }
+
+ /// Reads Claude Desktop's encrypted `sessionKey` cookie and asks claude.ai for usage.
+ private func claudeDesktopUsageRequest(interactive:Bool,home:URL) throws -> URLRequest {
+  let cookies=home.appendingPathComponent("Library/Application Support/Claude/Cookies")
+  var db:OpaquePointer?
+  guard sqlite3_open_v2(cookies.path,&db,SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX,nil) == SQLITE_OK else {
+   if db != nil { sqlite3_close(db) }
+   throw MusicFailure(message:"Abre la app Claude e inicia sesión.")
+  }
+  defer { sqlite3_close(db) }
+  sqlite3_busy_timeout(db,1000)
+  func encrypted(_ name:String) -> Data? {
+   var statement:OpaquePointer?
+   guard sqlite3_prepare_v2(db,"SELECT encrypted_value FROM cookies WHERE name=? AND host_key IN ('.claude.ai','claude.ai') ORDER BY LENGTH(encrypted_value) DESC LIMIT 1",-1,&statement,nil) == SQLITE_OK else { return nil }
+   defer { sqlite3_finalize(statement) }
+   sqlite3_bind_text(statement,1,name,-1,unsafeBitCast(-1,to:sqlite3_destructor_type.self))
+   guard sqlite3_step(statement) == SQLITE_ROW,let bytes=sqlite3_column_blob(statement,0) else { return nil }
+   return Data(bytes:bytes,count:Int(sqlite3_column_bytes(statement,0)))
+  }
+  guard let sessionBlob=encrypted("sessionKey") else { throw MusicFailure(message:"Inicia sesión en la app Claude.") }
+  let password=try keychainPassword(service:"Claude Safe Storage",account:"Claude Key",interactive:interactive)
+  let session=try ElectronSafeStorage.chromeCookieValue(sessionBlob,password:password)
+  let organization:String
+  if let orgBlob=encrypted("lastActiveOrg"),let org=try? ElectronSafeStorage.chromeCookieValue(orgBlob,password:password),!org.isEmpty {
+   organization=org
+  } else {
+   let history=home.appendingPathComponent("Library/Application Support/Claude/plan-usage-history.json")
+   guard let data=try? Data(contentsOf:history),let row=try? JSONSerialization.jsonObject(with:data) as? [String:Any],let samples=row["samples"] as? [[String:Any]],let org=samples.last?["org"] as? String,!org.isEmpty else {
+    throw MusicFailure(message:"Abre Claude Desktop y consulta Uso una vez para fijar la organización.")
+   }
+   organization=org
+  }
+  var request=URLRequest(url:URL(string:"https://claude.ai/api/organizations/\(organization)/usage")!)
+  request.setValue("sessionKey=\(session)",forHTTPHeaderField:"Cookie")
+  request.setValue("Mozilla/5.0",forHTTPHeaderField:"User-Agent")
+  return request
  }
 
  /// Credential for calling Anthropic Messages (auto-EQ, etc.).
@@ -291,6 +337,8 @@ actor AICredentialReader {
  @Published var enabled=false
  @Published var stale=false
  @Published private(set) var accessRequested=false
+ /// Notch only shows accounts that already returned live limits (connect in Ajustes first).
+ var notchReady:Bool { enabled && snapshot != nil }
  private let reader=AICredentialReader()
  private var timer:Timer?
  private var generation=0
@@ -298,7 +346,7 @@ actor AICredentialReader {
  private var retryAfter=Date.distantPast
  init(_ provider:AIProvider) { self.provider=provider;accessRequested=provider == .claude && UserDefaults.standard.bool(forKey:"claudeAccessRequested") }
  func connect() { guard !enabled else { return };enabled=true;generation += 1;task=Task { await refresh() } }
- func disconnect() { enabled=false;generation += 1;task?.cancel();task=nil;timer?.invalidate();timer=nil;loading=false;stale=snapshot != nil }
+ func disconnect() { enabled=false;generation += 1;task?.cancel();task=nil;timer?.invalidate();timer=nil;loading=false;stale=snapshot != nil;if !stale { snapshot=nil;error=nil } }
  func refresh(interactive:Bool=false) async {
   guard enabled,!loading else { return }
   guard Date()>=retryAfter else { schedule();return }
