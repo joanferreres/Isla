@@ -76,13 +76,15 @@ struct RecordPlayerMixer: View {
             guard active else { return }
             await readVolume()
             await loadPresets()
-            if let current = try? await equalizer.read(), !Task.isCancelled, !changingEQ {
+            // Seed / refresh from the *active* Music curve only when idle.
+            // Never stomp a write in flight — that looked like knobs snapping home.
+            if !changingEQ, let current = try? await equalizer.read(), !Task.isCancelled {
                 gains = current
                 eqFailure = nil
             }
             if preferences.value.musicClaudeEQEnabled {
                 selectedPreset = Self.claudeStyleName
-            } else if let name = try? await equalizer.currentPresetName(), !Task.isCancelled {
+            } else if !changingEQ, let name = try? await equalizer.currentPresetName(), !Task.isCancelled {
                 selectedPreset = name
             }
         }
@@ -268,12 +270,15 @@ struct RecordPlayerMixer: View {
     }
 
     private func adjust(_ target: Double, band: MixerBand) {
+        // Manual knob = user owns the curve; stop Claude from retuning afterward.
         disableClaudeStyle()
         var preview = gains
+        for missing in MixerBand.allCases where preview[missing] == nil { preview[missing] = 0 }
         preview[band] = min(12, max(-12, target))
         applyEQ(preview: preview) {
-            let result = try await equalizer.set(preview[band] ?? 0, for: band)
-            // Manual band edits leave Music on a custom curve.
+            // Write the whole UI triad to Manual — updating one actor band left
+            // stale mid/treble from an old Manual snapshot and snapped other knobs.
+            let result = try await equalizer.setAll(preview)
             selectedPreset = try? await equalizer.currentPresetName() ?? "Manual"
             return result
         }
@@ -364,7 +369,8 @@ struct RecordPlayerMixer: View {
         if snapshot.trackID == lastClaudeTrackID, outputKey == lastClaudeOutputKey { return }
         try? await Task.sleep(for: .milliseconds(450))
         guard !Task.isCancelled else { return }
-        guard preferences.value.musicClaudeEQEnabled, active else { return }
+        // User may have turned a knob (disables Claude) or started another write during the wait.
+        guard preferences.value.musicClaudeEQEnabled, active, !changingEQ else { return }
         guard music.state.snapshot?.trackID == snapshot.trackID else { return }
         if presets.isEmpty { await loadPresets() }
         claudeStatus = "Claude EQ · \(output.shortLabel)…"
@@ -378,11 +384,10 @@ struct RecordPlayerMixer: View {
             )
             guard !Task.isCancelled, music.state.snapshot?.trackID == snapshot.trackID else { return }
             if let preset = advice.preset {
-                applyEQ(preview: [
-                    .bass: advice.bass, .mid: advice.mid, .treble: advice.treble
-                ]) {
+                // Don't preview Claude's numeric guess then replace it with the
+                // factory preset averages — that "weird switch" looked like snap-back.
+                applyEQ(preview: gains) {
                     let result = try await equalizer.selectPreset(preset)
-                    // Keep the style menu on «Claude» while auto-EQ owns the curve.
                     selectedPreset = Self.claudeStyleName
                     return result
                 }

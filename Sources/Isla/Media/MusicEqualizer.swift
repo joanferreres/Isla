@@ -81,13 +81,20 @@ actor MusicEqualizer {
         uniqueKeysWithValues: MixerBand.allCases.map { ($0, 0.0) }
     )
 
+    /// Live curve Music is actually using — never prefer a stale Manual snapshot
+    /// while a factory preset is selected (that was snapping the mixer knobs back).
     func read() throws -> [MixerBand: Double] {
-        if let gains = try? readManualGains() {
+        if let name = try? currentPresetName(), !name.isEmpty,
+           let bands = try? readPresetBands(name) {
+            desired = gainsFromBands(bands)
+            return desired
+        }
+        if let controls = try? findControls() {
+            let gains = controls.gains(for: controls.values)
             desired = gains
             return gains
         }
-        let controls = try findControls()
-        let gains = controls.gains(for: controls.values)
+        let gains = try readManualGains()
         desired = gains
         return gains
     }
