@@ -39,6 +39,8 @@ actor DeniedMusicReader:AppleMusicReading {
  var calls=0
  func isRunning() async -> Bool { true }
  func read() async throws -> MediaSnapshot? { calls += 1;throw MusicFailure(message:"denied",code:-1743) }
+ func cachedArtwork(trackID:String) async -> Data? { nil }
+ func adoptSystemArtwork(for trackID:String) async {}
  func artwork(trackID:String) async throws -> Data? { nil }
  func neighbors() async throws -> MusicNeighbors? { nil }
  func send(_ command:MediaCommand) async throws {}

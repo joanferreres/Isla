@@ -25,6 +25,9 @@ struct RecordPlayerMixer: View {
     @State private var claudeStatus: String?
     @State private var lastClaudeTrackID: String?
     @State private var lastClaudeOutputKey: String?
+    /// Normalized genre currently driving EQ (Music library or last Claude label).
+    @State private var currentGenreKey: String?
+    @State private var lastAppliedAdvice: MusicClaudeEQService.Advice?
     @StateObject private var audioOutput = MusicAudioOutputMonitor()
 
     /// Style entry in the EQ menu — enables Claude auto-EQ (not a Music factory preset).
@@ -93,6 +96,8 @@ struct RecordPlayerMixer: View {
                 selectedPreset = Self.claudeStyleName
                 lastClaudeTrackID = nil
                 lastClaudeOutputKey = nil
+                currentGenreKey = nil
+                lastAppliedAdvice = nil
             } else if selectedPreset == Self.claudeStyleName {
                 selectedPreset = nil
             }
@@ -101,6 +106,8 @@ struct RecordPlayerMixer: View {
             // Re-tune when switching AirPods ↔ speakers (or any default output).
             lastClaudeTrackID = nil
             lastClaudeOutputKey = nil
+            currentGenreKey = nil
+            lastAppliedAdvice = nil
         }
         .task(id: volumeRequest) {
             guard let target = volumeRequest else { return }
@@ -367,6 +374,30 @@ struct RecordPlayerMixer: View {
         let output = audioOutput.output
         let outputKey = "\(output.kind.rawValue)|\(output.uid)"
         if snapshot.trackID == lastClaudeTrackID, outputKey == lastClaudeOutputKey { return }
+
+        let libraryGenre = snapshot.genre
+        let libraryKey = MusicClaudeEQService.normalizeGenre(libraryGenre)
+
+        // Same genre + same output → keep EQ, skip Claude/API tokens.
+        if !libraryKey.isEmpty,
+           libraryKey == currentGenreKey,
+           outputKey == lastClaudeOutputKey,
+           lastAppliedAdvice != nil {
+            lastClaudeTrackID = snapshot.trackID
+            claudeStatus = "\(lastAppliedAdvice?.genre ?? libraryGenre) · mismo género · \(output.shortLabel)"
+            return
+        }
+        if !libraryKey.isEmpty,
+           let cached = await claudeEQ.cachedAdvice(genre: libraryGenre, output: output) {
+            guard preferences.value.musicClaudeEQEnabled, active, !changingEQ else { return }
+            applyClaudeAdvice(cached, outputLabel: output.shortLabel, reused: true)
+            currentGenreKey = libraryKey
+            lastAppliedAdvice = cached
+            lastClaudeTrackID = snapshot.trackID
+            lastClaudeOutputKey = outputKey
+            return
+        }
+
         try? await Task.sleep(for: .milliseconds(450))
         guard !Task.isCancelled else { return }
         // User may have turned a knob (disables Claude) or started another write during the wait.
@@ -380,29 +411,13 @@ struct RecordPlayerMixer: View {
                 artist: snapshot.artist,
                 presets: presets,
                 output: output,
+                musicGenre: libraryGenre,
                 interactiveAuth: false
             )
             guard !Task.isCancelled, music.state.snapshot?.trackID == snapshot.trackID else { return }
-            if let preset = advice.preset {
-                // Don't preview Claude's numeric guess then replace it with the
-                // factory preset averages — that "weird switch" looked like snap-back.
-                applyEQ(preview: gains) {
-                    let result = try await equalizer.selectPreset(preset)
-                    selectedPreset = Self.claudeStyleName
-                    return result
-                }
-                claudeStatus = "\(advice.genre) · \(preset) · \(output.shortLabel) · \(advice.provider)"
-            } else {
-                let target: [MixerBand: Double] = [
-                    .bass: advice.bass, .mid: advice.mid, .treble: advice.treble
-                ]
-                applyEQ(preview: target) {
-                    let result = try await equalizer.setAll(target)
-                    selectedPreset = Self.claudeStyleName
-                    return result
-                }
-                claudeStatus = "\(advice.genre) · bandas · \(output.shortLabel) · \(advice.provider)"
-            }
+            applyClaudeAdvice(advice, outputLabel: output.shortLabel, reused: false)
+            currentGenreKey = !libraryKey.isEmpty ? libraryKey : MusicClaudeEQService.normalizeGenre(advice.genre)
+            lastAppliedAdvice = advice
             lastClaudeTrackID = snapshot.trackID
             lastClaudeOutputKey = outputKey
         } catch let failure as MusicClaudeEQService.Failure {
@@ -415,6 +430,33 @@ struct RecordPlayerMixer: View {
             guard !Task.isCancelled else { return }
             claudeStatus = error.localizedDescription
             lastClaudeTrackID = snapshot.trackID
+        }
+    }
+
+    private func applyClaudeAdvice(_ advice: MusicClaudeEQService.Advice, outputLabel: String, reused: Bool) {
+        if let preset = advice.preset {
+            // Don't preview Claude's numeric guess then replace it with the
+            // factory preset averages — that "weird switch" looked like snap-back.
+            applyEQ(preview: gains) {
+                let result = try await equalizer.selectPreset(preset)
+                selectedPreset = Self.claudeStyleName
+                return result
+            }
+            claudeStatus = reused
+                ? "\(advice.genre) · \(preset) · mismo género · \(outputLabel)"
+                : "\(advice.genre) · \(preset) · \(outputLabel) · \(advice.provider)"
+        } else {
+            let target: [MixerBand: Double] = [
+                .bass: advice.bass, .mid: advice.mid, .treble: advice.treble
+            ]
+            applyEQ(preview: target) {
+                let result = try await equalizer.setAll(target)
+                selectedPreset = Self.claudeStyleName
+                return result
+            }
+            claudeStatus = reused
+                ? "\(advice.genre) · bandas · mismo género · \(outputLabel)"
+                : "\(advice.genre) · bandas · \(outputLabel) · \(advice.provider)"
         }
     }
 }

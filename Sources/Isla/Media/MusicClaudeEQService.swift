@@ -28,9 +28,19 @@ actor MusicClaudeEQService {
     }
 
     private let reader = AICredentialReader()
+    /// Per track+output (exact repeats).
     private var cache: [String: Advice] = [:]
+    /// Per Music/Claude genre+output — skips API when the next track shares the genre.
+    private var genreCache: [String: Advice] = [:]
     private let claudeModel = "claude-haiku-4-5-20251001"
     private let openAIModel = "gpt-4o-mini"
+
+    /// Normalize library / model genre labels for cheap equality checks.
+    static func normalizeGenre(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+    }
 
     func hasClaudeAPIKey() async -> Bool { await reader.hasStoredAnthropicAPIKey() }
     func hasOpenAIAPIKey() async -> Bool { await reader.hasStoredOpenAIAPIKey() }
@@ -44,17 +54,32 @@ actor MusicClaudeEQService {
     func saveAPIKey(_ key: String) async throws { try await saveClaudeAPIKey(key) }
     func clearAPIKey() async { await clearClaudeAPIKey() }
 
+    /// Reuse a prior EQ decision when Music (or Claude) already labeled this genre for this output.
+    func cachedAdvice(genre: String, output: MusicAudioOutput) -> Advice? {
+        let key = Self.normalizeGenre(genre)
+        guard !key.isEmpty else { return nil }
+        return genreCache[genreOutputKey(key, output: output)]
+    }
+
     func advise(
         title: String,
         artist: String,
         presets: [String],
         output: MusicAudioOutput,
+        musicGenre: String = "",
         interactiveAuth: Bool = false
     ) async throws -> Advice {
         let key = cacheKey(title: title, artist: artist, output: output)
-        if let cached = cache[key] { return cached }
+        if let cached = cache[key] {
+            rememberGenre(cached, musicGenre: musicGenre, output: output)
+            return cached
+        }
+        if let byGenre = cachedAdvice(genre: musicGenre, output: output) {
+            cache[key] = byGenre
+            return byGenre
+        }
 
-        let prompt = advicePrompt(title: title, artist: artist, presets: presets, output: output)
+        let prompt = advicePrompt(title: title, artist: artist, presets: presets, output: output, musicGenre: musicGenre)
         var lastAuth: String?
         var lastNetwork: String?
 
@@ -64,7 +89,7 @@ actor MusicClaudeEQService {
             var advice = try await askClaude(auth: auth, system: prompt.system, user: prompt.user, presets: presets)
             advice.provider = "Claude"
             advice = output.adapted(advice)
-            remember(advice, key: key)
+            remember(advice, key: key, musicGenre: musicGenre, output: output)
             return advice
         } catch let failure as Failure {
             switch failure {
@@ -82,7 +107,7 @@ actor MusicClaudeEQService {
             var advice = try await askOpenAI(apiKey: openAIKey, system: prompt.system, user: prompt.user, presets: presets)
             advice.provider = "ChatGPT"
             advice = output.adapted(advice)
-            remember(advice, key: key)
+            remember(advice, key: key, musicGenre: musicGenre, output: output)
             return advice
         } catch let failure as Failure {
             throw failure
@@ -98,7 +123,8 @@ actor MusicClaudeEQService {
         title: String,
         artist: String,
         presets: [String],
-        output: MusicAudioOutput
+        output: MusicAudioOutput,
+        musicGenre: String
     ) -> (system: String, user: String) {
         let presetList = presets.filter { !$0.isEmpty && $0.caseInsensitiveCompare("Manual") != .orderedSame }
             .prefix(40)
@@ -112,7 +138,13 @@ actor MusicClaudeEQService {
         Keep gains subtle (−6…+6) unless the genre clearly needs more.
         Adapt the curve to this output: \(output.promptHint)
         """
-        let user = "Track: \"\(title)\" by \"\(artist.isEmpty ? "unknown" : artist)\". Output: \(output.shortLabel)."
+        let genreHint = musicGenre.trimmingCharacters(in: .whitespacesAndNewlines)
+        let user: String
+        if genreHint.isEmpty {
+            user = "Track: \"\(title)\" by \"\(artist.isEmpty ? "unknown" : artist)\". Output: \(output.shortLabel)."
+        } else {
+            user = "Track: \"\(title)\" by \"\(artist.isEmpty ? "unknown" : artist)\". Library genre: \"\(genreHint)\". Output: \(output.shortLabel)."
+        }
         return (system, user)
     }
 
@@ -179,15 +211,32 @@ actor MusicClaudeEQService {
         return advice
     }
 
-    private func remember(_ advice: Advice, key: String) {
+    private func remember(_ advice: Advice, key: String, musicGenre: String, output: MusicAudioOutput) {
         cache[key] = advice
         if cache.count > 80 {
             cache.removeValue(forKey: cache.keys.first ?? key)
+        }
+        rememberGenre(advice, musicGenre: musicGenre, output: output)
+    }
+
+    private func rememberGenre(_ advice: Advice, musicGenre: String, output: MusicAudioOutput) {
+        let fromLibrary = Self.normalizeGenre(musicGenre)
+        let fromModel = Self.normalizeGenre(advice.genre)
+        for label in [fromLibrary, fromModel] where !label.isEmpty {
+            let key = genreOutputKey(label, output: output)
+            genreCache[key] = advice
+        }
+        if genreCache.count > 60 {
+            genreCache.removeValue(forKey: genreCache.keys.first ?? "")
         }
     }
 
     private func cacheKey(title: String, artist: String, output: MusicAudioOutput) -> String {
         "\(title.lowercased())|\(artist.lowercased())|\(output.kind.rawValue)|\(output.uid.lowercased())"
+    }
+
+    private func genreOutputKey(_ normalizedGenre: String, output: MusicAudioOutput) -> String {
+        "\(normalizedGenre)|\(output.kind.rawValue)|\(output.uid.lowercased())"
     }
 
     private func claudeText(from data: Data) -> String? {

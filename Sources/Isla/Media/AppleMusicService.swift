@@ -135,19 +135,25 @@ import IslandCore
             state.update(snapshot)
             receivedAt = Date()
             error = nil
-            if let snapshot, changed || state.artworkData == nil {
-                let data = try await reader.artwork(trackID: snapshot.trackID)
-                let latest = try await reader.read()
-                guard enabled, current == generation else { return }
-                state.update(latest)
-                receivedAt = Date()
-                if let data, latest?.trackID == snapshot.trackID {
-                    _ = self.state.acceptArtwork(data, for: snapshot.trackID)
+            // Warm the persistent-ID cache from MediaRemote, then paint without waiting on a helper.
+            if let snapshot, state.artworkData == nil {
+                await reader.adoptSystemArtwork(for: snapshot.trackID)
+                if let quick = await reader.cachedArtwork(trackID: snapshot.trackID) {
+                    _ = state.acceptArtwork(quick, for: snapshot.trackID)
                 }
             }
             ingestCurrentCover(forceNeighbors: changed || neighborArt.nextTrackID == nil)
+            // Prefetch neighbors in parallel with any AppleScript artwork upgrade.
             if changed || neighborArt.nextTrackID == nil || neighborArt.previousTrackID == nil {
                 scheduleNeighborPrefetch(generation: current)
+            }
+            if let snapshot, changed || state.artworkData == nil {
+                if let data = try? await reader.artwork(trackID: snapshot.trackID),
+                   enabled, current == generation,
+                   state.snapshot?.trackID == snapshot.trackID {
+                    _ = state.acceptArtwork(data, for: snapshot.trackID)
+                    ingestCurrentCover(forceNeighbors: false)
+                }
             }
         } catch {
             guard enabled, current == generation else { return }
