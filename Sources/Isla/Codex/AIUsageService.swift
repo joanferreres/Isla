@@ -196,16 +196,20 @@ actor AICredentialReader {
  }
 
  /// Credential for calling Anthropic Messages (auto-EQ, etc.).
- /// Order: Claude Code OAuth → Isla keychain → process env → login-shell `ANTHROPIC_API_KEY`.
+ /// Order: Isla keychain API key → Claude Code OAuth → process env / login-shell `ANTHROPIC_API_KEY`.
+ /// A key the user just pasted must win over a flaky/expired OAuth token (TLS / connection-lost on Messages).
  func claudeAPIAuth(interactive:Bool=false,home:URL=FileManager.default.homeDirectoryForCurrentUser) throws -> ClaudeAPIAuth {
+  if let key=storedSecret(service:apiKeyService),!key.isEmpty {
+   return .apiKey(key)
+  }
   if let oauth=try? claudeOAuthToken(interactive:interactive,home:home) {
    return .oauth(token:oauth)
   }
   if let key=anthropicAPIKey() { return .apiKey(key) }
   throw MusicFailure(message:"""
   Auto-EQ con Claude necesita autenticación.
-  1) Preferido: «claude auth login» (Claude Code) y permitir el llavero en Isla → IA → Claude.
-  2) O pega una API key de Anthropic (sk-ant-…) en Ajustes → Música → EQ con IA.
+  1) Pega una API key de Anthropic (sk-ant-…) en Ajustes → Música → EQ con IA.
+  2) O «claude auth login» (Claude Code) y permitir el llavero en Isla → IA → Claude.
   3) O define ANTHROPIC_API_KEY en tu shell de login (~/.zshrc); Isla la importa al llavero.
   """)
  }
@@ -358,15 +362,15 @@ actor AICredentialReader {
    if mayAsk,provider == .claude { accessRequested=true;UserDefaults.standard.set(true,forKey:"claudeAccessRequested") }
    var request=try await reader.request(provider,interactive:mayAsk)
    guard enabled,g == generation,!Task.isCancelled else { return }
-   request.timeoutInterval=15;request.setValue("application/json",forHTTPHeaderField:"Accept")
-   let (data,response)=try await URLSession.shared.data(for:request)
+   request.timeoutInterval=30;request.setValue("application/json",forHTTPHeaderField:"Accept")
+   let (data,response)=try await AIHTTPClient.data(for:request,attempts:3)
    guard enabled,g == generation,!Task.isCancelled else { return }
    let http=response as? HTTPURLResponse,code=http?.statusCode ?? 0
    if code == 429 { retryAfter=Date().addingTimeInterval(max(900,Double(http?.value(forHTTPHeaderField:"Retry-After") ?? "") ?? 0));throw MusicFailure(message:"\(provider.title) limita las consultas. Se actualizará más tarde.") }
    if provider == .claude,[401,403].contains(code) { await reader.forgetClaude() }
    guard code == 200 else { throw MusicFailure(message:[401,403].contains(code) ? "Abre \(provider.title == "Claude" ? "Claude Code" : provider.title) y renueva tu sesión." : "No se pudo consultar \(provider.title) (\(code)).") }
    snapshot=try AIUsageDecoder.decode(data,provider:provider,fetchedAt:Date());error=nil;stale=false
-  } catch { guard enabled,g == generation,!Task.isCancelled else { return };self.error=error is MusicFailure || error is AIUsageDecoder.Failure || error is ElectronSafeStorage.Failure ? error.localizedDescription : "No se pudo conectar con \(provider.title).";stale=snapshot != nil }
+  } catch { guard enabled,g == generation,!Task.isCancelled else { return };self.error=error is MusicFailure || error is AIUsageDecoder.Failure || error is ElectronSafeStorage.Failure ? error.localizedDescription : error.localizedDescription;stale=snapshot != nil }
  }
  private func schedule() {
   timer?.invalidate()

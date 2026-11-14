@@ -238,7 +238,13 @@ private struct MusicAIEQKeySetup: View {
     try await advisor.saveClaudeAPIKey(claudeDraft)
     claudeDraft = ""
     hasClaudeKey = true
-    status = "API key de Claude guardada en el llavero."
+    status = "API key guardada — comprobando Claude (Haiku)…"
+    do {
+     try await advisor.verifyClaudeAPIKey()
+     status = "API key de Claude OK (Haiku responde)."
+    } catch {
+     status = "Key guardada, pero la prueba falló: \(error.localizedDescription)"
+    }
    },
    onClear: {
     await advisor.clearClaudeAPIKey()
@@ -269,7 +275,7 @@ private struct MusicAIEQKeySetup: View {
   if let status {
    Text(status).font(.caption2).foregroundStyle(.secondary)
   }
-  Text("Orden: Claude OAuth → key Claude → key ChatGPT (o ANTHROPIC_API_KEY / OPENAI_API_KEY en el entorno).")
+  Text("Orden EQ: key Claude (llavero) → OAuth Claude Code → key ChatGPT. Modelo: Haiku (barato).")
    .font(.caption2)
    .foregroundStyle(.secondary)
  }

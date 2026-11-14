@@ -9,7 +9,7 @@ struct RecordDiscChanger: View {
     let diameter: CGFloat
     let currentTitle: String?
     let currentArtist: String?
-    let onPlay: (MusicCassetteTrack, NSImage?) async -> String?
+    let onPlay: (MusicCassetteTrack, NSImage?, Data?) async -> String?
 
     @State private var service = MusicPlaylistService()
     @State private var catalog: MusicPlaylistCatalog?
@@ -18,6 +18,8 @@ struct RecordDiscChanger: View {
     /// Continuous cursor in playlist-index space. Integer = snapped front track.
     @State private var cursor = 0.0
     @State private var artworks: [String: NSImage] = [:]
+    /// Raw bytes kept so the main platter can prime Music's cover cache on click.
+    @State private var artworkData: [String: Data] = [:]
     @State private var busy = false
     @State private var status: String?
     @State private var turning = false
@@ -230,7 +232,7 @@ struct RecordDiscChanger: View {
             busy = true
             status = nil
             defer { busy = false }
-            if let message = await onPlay(track, artworks[track.id]) {
+            if let message = await onPlay(track, artworks[track.id], artworkData[track.id]) {
                 status = message
             }
         }
@@ -428,7 +430,7 @@ struct RecordDiscChanger: View {
         guard !pending.isEmpty else { return }
         let service = service
         prefetchTask = Task { @MainActor in
-            await withTaskGroup(of: (String, NSImage?).self) { group in
+            await withTaskGroup(of: (String, Data?, NSImage?).self) { group in
                 var iterator = pending.makeIterator()
                 let workers = min(6, pending.count)
                 for _ in 0..<workers {
@@ -436,17 +438,18 @@ struct RecordDiscChanger: View {
                     let trackID = track.id
                     group.addTask {
                         let data = try? await service.artwork(trackID: trackID)
-                        return (trackID, data.flatMap(NSImage.init(data:)))
+                        return (trackID, data, data.flatMap(NSImage.init(data:)))
                     }
                 }
-                while let (id, image) = await group.next() {
+                while let (id, data, image) = await group.next() {
                     if Task.isCancelled { break }
+                    if let data { artworkData[id] = data }
                     if let image { artworks[id] = image }
                     if let track = iterator.next() {
                         let trackID = track.id
                         group.addTask {
                             let data = try? await service.artwork(trackID: trackID)
-                            return (trackID, data.flatMap(NSImage.init(data:)))
+                            return (trackID, data, data.flatMap(NSImage.init(data:)))
                         }
                     }
                 }

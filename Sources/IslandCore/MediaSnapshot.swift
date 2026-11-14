@@ -28,6 +28,16 @@ public struct MediaState {
  public private(set) var snapshot:MediaSnapshot?
  public private(set) var artworkData:Data?
  public init() {}
- public mutating func update(_ snapshot:MediaSnapshot?) { if self.snapshot?.trackID != snapshot?.trackID { artworkData=nil };self.snapshot=snapshot }
+ /// Swap identity. Optional `primedArtwork` keeps the platter from flashing empty when the
+ /// changer/cache already knows the cover for the landing track.
+ public mutating func update(_ snapshot:MediaSnapshot?, primedArtwork:Data?=nil) {
+  if self.snapshot?.trackID != snapshot?.trackID {
+   artworkData = primedArtwork
+  }
+  self.snapshot=snapshot
+  if let primedArtwork, let id=snapshot?.trackID, self.snapshot?.trackID == id {
+   artworkData = primedArtwork
+  }
+ }
  public mutating func acceptArtwork(_ data:Data,for trackID:String) -> Bool { guard snapshot?.trackID == trackID else { return false }; artworkData=data;return true }
 }

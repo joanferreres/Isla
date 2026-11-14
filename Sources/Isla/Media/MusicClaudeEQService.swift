@@ -32,7 +32,9 @@ actor MusicClaudeEQService {
     private var cache: [String: Advice] = [:]
     /// Per Music/Claude genre+output — skips API when the next track shares the genre.
     private var genreCache: [String: Advice] = [:]
+    /// Auto-EQ must stay on the cheapest Claude tier (Haiku). Never Sonnet/Opus — token burn for a JSON EQ tip.
     private let claudeModel = "claude-haiku-4-5-20251001"
+    /// Fallback when Claude auth is missing — also the cheap OpenAI tier.
     private let openAIModel = "gpt-4o-mini"
 
     /// Normalize library / model genre labels for cheap equality checks.
@@ -83,11 +85,11 @@ actor MusicClaudeEQService {
         var lastAuth: String?
         var lastNetwork: String?
 
-        // 1) Claude — OAuth or Anthropic API key.
+        // 1) Claude — Isla API key preferred, then OAuth (Haiku).
         do {
             let auth = try await reader.claudeAPIAuth(interactive: interactiveAuth)
             var advice = try await askClaude(auth: auth, system: prompt.system, user: prompt.user, presets: presets)
-            advice.provider = "Claude"
+            advice.provider = "Claude·Haiku"
             advice = output.adapted(advice)
             remember(advice, key: key, musicGenre: musicGenre, output: output)
             return advice
@@ -105,7 +107,7 @@ actor MusicClaudeEQService {
         do {
             let openAIKey = try await reader.openAIAPIKey()
             var advice = try await askOpenAI(apiKey: openAIKey, system: prompt.system, user: prompt.user, presets: presets)
-            advice.provider = "ChatGPT"
+            advice.provider = "ChatGPT·mini"
             advice = output.adapted(advice)
             remember(advice, key: key, musicGenre: musicGenre, output: output)
             return advice
@@ -151,7 +153,7 @@ actor MusicClaudeEQService {
     private func askClaude(auth: ClaudeAPIAuth, system: String, user: String, presets: [String]) async throws -> Advice {
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         request.httpMethod = "POST"
-        request.timeoutInterval = 20
+        request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         switch auth {
@@ -169,7 +171,13 @@ actor MusicClaudeEQService {
             "messages": [["role": "user", "content": user]],
         ] as [String: Any])
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await AIHTTPClient.data(for: request, attempts: 3)
+        } catch {
+            throw Failure.network(error.localizedDescription)
+        }
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200...299).contains(code) else {
             let snippet = String(data: data, encoding: .utf8)?.prefix(180) ?? ""
@@ -185,7 +193,7 @@ actor MusicClaudeEQService {
     private func askOpenAI(apiKey: String, system: String, user: String, presets: [String]) async throws -> Advice {
         var request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
         request.httpMethod = "POST"
-        request.timeoutInterval = 20
+        request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
@@ -198,7 +206,13 @@ actor MusicClaudeEQService {
             ],
         ] as [String: Any])
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await AIHTTPClient.data(for: request, attempts: 3)
+        } catch {
+            throw Failure.network(error.localizedDescription)
+        }
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200...299).contains(code) else {
             let snippet = String(data: data, encoding: .utf8)?.prefix(180) ?? ""
@@ -209,6 +223,42 @@ actor MusicClaudeEQService {
         }
         guard let advice = parseAdvice(text: openAIText(from: data), presets: presets) else { throw Failure.decode }
         return advice
+    }
+
+    /// Tiny Messages probe after saving a key — surfaces TLS/auth errors immediately in Ajustes.
+    func verifyClaudeAPIKey() async throws {
+        let auth = try await reader.claudeAPIAuth(interactive: false)
+        var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        switch auth {
+        case .oauth(let token):
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        case .apiKey(let key):
+            request.setValue(key, forHTTPHeaderField: "x-api-key")
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": claudeModel,
+            "max_tokens": 1,
+            "messages": [["role": "user", "content": "ping"]],
+        ] as [String: Any])
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await AIHTTPClient.data(for: request, attempts: 3)
+        } catch {
+            throw Failure.network(error.localizedDescription)
+        }
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if [401, 403].contains(code) {
+            throw Failure.auth("Claude rechazó la API key (\(code)). Comprueba que sea sk-ant-… válida.")
+        }
+        guard (200...299).contains(code) else {
+            let snippet = String(data: data, encoding: .utf8)?.prefix(120) ?? ""
+            throw Failure.network("Claude API \(code): \(snippet)")
+        }
     }
 
     private func remember(_ advice: Advice, key: String, musicGenre: String, output: MusicAudioOutput) {

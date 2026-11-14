@@ -398,6 +398,8 @@ protocol AppleMusicReading:Sendable {
  func read() async throws -> MediaSnapshot?
  /// Memory hit without spawning the Music helper.
  func cachedArtwork(trackID:String) async -> Data?
+ /// Seed persistent-ID cache from changer/UI so the main disc can paint before AppleScript returns.
+ func rememberCachedArtwork(_ data:Data, for trackID:String) async
  /// Bind the latest MediaRemote cover to a Music persistent ID (no helper spawn).
  func adoptSystemArtwork(for trackID:String) async
  func artwork(trackID:String) async throws -> Data?
@@ -439,6 +441,9 @@ actor AppleMusicBridge:AppleMusicReading {
   if let hit=artworkCache[trackID] { return hit }
   if let hit=systemReply?.artwork(for:trackID) { return hit }
   return nil
+ }
+ func rememberCachedArtwork(_ data:Data, for trackID:String) {
+  rememberArtwork(data,for:trackID)
  }
  /// Map the latest MediaRemote cover onto a Music persistent ID so notch/swipe stay warm.
  func adoptSystemArtwork(for trackID:String) {

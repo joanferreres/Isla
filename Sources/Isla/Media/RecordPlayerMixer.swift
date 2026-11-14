@@ -12,7 +12,6 @@ struct RecordPlayerMixer: View {
     @State private var claudeEQ = MusicClaudeEQService()
     @State private var gains: [MixerBand: Double] = [:]
     @State private var eqFailure: MusicEqualizer.Failure?
-    @State private var changingEQ = false
     @State private var eqRevision = 0
     @State private var showAccess = false
     @State private var offeredAccess = false
@@ -79,15 +78,13 @@ struct RecordPlayerMixer: View {
             guard active else { return }
             await readVolume()
             await loadPresets()
-            // Seed / refresh from the *active* Music curve only when idle.
-            // Never stomp a write in flight — that looked like knobs snapping home.
-            if !changingEQ, let current = try? await equalizer.read(), !Task.isCancelled {
+            if let current = try? await equalizer.read(), !Task.isCancelled {
                 gains = current
                 eqFailure = nil
             }
             if preferences.value.musicClaudeEQEnabled {
                 selectedPreset = Self.claudeStyleName
-            } else if !changingEQ, let name = try? await equalizer.currentPresetName(), !Task.isCancelled {
+            } else if let name = try? await equalizer.currentPresetName(), !Task.isCancelled {
                 selectedPreset = name
             }
         }
@@ -163,9 +160,9 @@ struct RecordPlayerMixer: View {
             .frame(maxWidth: 132, alignment: .leading)
         }
         .controlSize(.small)
-        .disabled(!active || changingEQ)
+        .disabled(!active)
         .accessibilityLabel("Estilo del ecualizador")
-        .help("Elige «Claude» para auto-EQ por tipo de música, o un preset de fábrica de Música.")
+        .help("Elige «Claude» para auto-EQ por tipo de música, o un preset de fábrica de Música. Un toque manual cancela Claude al instante.")
         if #available(macOS 26.0, *), !reduceTransparency {
             menu.menuStyle(.borderlessButton)
         } else {
@@ -175,9 +172,10 @@ struct RecordPlayerMixer: View {
 
     @ViewBuilder private var resetButton: some View {
         let button = Button {
-            disableClaudeStyle()
+            preemptClaudeForUserEdit()
             let neutral = Dictionary(uniqueKeysWithValues: MixerBand.allCases.map { ($0, 0.0) })
-            applyEQ(preview: neutral) {
+            applyEQ(preview: neutral, userInitiated: true) {
+                await equalizer.invalidatePendingWrites()
                 let result = try await equalizer.reset()
                 selectedPreset = try? await equalizer.currentPresetName()
                 return result
@@ -191,7 +189,7 @@ struct RecordPlayerMixer: View {
         .buttonBorderShape(.capsule)
         .accessibilityLabel("Restablecer ecualizador")
         .help("Poner graves, medios y agudos a cero y desactivar el EQ de Música")
-        .disabled(!active || changingEQ)
+        .disabled(!active)
         if #available(macOS 26.0, *), !reduceTransparency {
             button.buttonStyle(.glass)
         } else {
@@ -277,14 +275,13 @@ struct RecordPlayerMixer: View {
     }
 
     private func adjust(_ target: Double, band: MixerBand) {
-        // Manual knob = user owns the curve; stop Claude from retuning afterward.
-        disableClaudeStyle()
+        // Manual knob preempts Claude immediately — never wait on an in-flight auto-EQ latch.
+        preemptClaudeForUserEdit()
         var preview = gains
         for missing in MixerBand.allCases where preview[missing] == nil { preview[missing] = 0 }
         preview[band] = min(12, max(-12, target))
-        applyEQ(preview: preview) {
-            // Write the whole UI triad to Manual — updating one actor band left
-            // stale mid/treble from an old Manual snapshot and snapped other knobs.
+        applyEQ(preview: preview, userInitiated: true) {
+            await equalizer.invalidatePendingWrites()
             let result = try await equalizer.setAll(preview)
             selectedPreset = try? await equalizer.currentPresetName() ?? "Manual"
             return result
@@ -296,6 +293,8 @@ struct RecordPlayerMixer: View {
         selectedPreset = Self.claudeStyleName
         lastClaudeTrackID = nil
         lastClaudeOutputKey = nil
+        currentGenreKey = nil
+        lastAppliedAdvice = nil
         claudeStatus = "Estilo Claude — EQ según música y \(audioOutput.output.shortLabel)"
     }
 
@@ -305,9 +304,16 @@ struct RecordPlayerMixer: View {
         claudeStatus = nil
     }
 
-    private func applyPreset(_ name: String) {
+    /// Drop Claude ownership so any in-flight auto-EQ aborts before writing again.
+    private func preemptClaudeForUserEdit() {
         disableClaudeStyle()
-        applyEQ(preview: gains) {
+    }
+
+    private func applyPreset(_ name: String) {
+        preemptClaudeForUserEdit()
+        applyEQ(preview: gains, userInitiated: true) {
+            // Invalidate Claude's latch before this write joins the equalizer actor queue.
+            await equalizer.invalidatePendingWrites()
             let result = try await equalizer.selectPreset(name)
             selectedPreset = name
             return result
@@ -331,31 +337,41 @@ struct RecordPlayerMixer: View {
         }
     }
 
-    private func applyEQ(preview: [MixerBand: Double], operation: @escaping () async throws -> [MixerBand: Double]) {
+    private func applyEQ(
+        preview: [MixerBand: Double],
+        successStatus: String? = nil,
+        userInitiated: Bool = false,
+        operation: @escaping () async throws -> [MixerBand: Double]
+    ) {
         guard active else { return }
         let confirmed = gains
         let confirmedPreset = selectedPreset
+        let confirmedStatus = claudeStatus
         gains = preview
         eqRevision += 1
         let revision = eqRevision
-        changingEQ = true
         Task {
-            defer {
-                // Always release the menu/knobs for this revision — never leave the UI stuck.
-                if revision == eqRevision { changingEQ = false }
-            }
             do {
                 let result = try await operation()
                 if revision == eqRevision {
                     gains = result
                     eqFailure = nil
+                    if let successStatus { claudeStatus = successStatus }
                 }
+            } catch let failure as MusicEqualizer.Failure where failure == .superseded {
+                // Newer write won — leave that revision's preview alone.
             } catch {
                 if revision == eqRevision {
                     gains = confirmed
                     selectedPreset = confirmedPreset
                     let failure = (error as? MusicEqualizer.Failure) ?? .unresponsive
                     eqFailure = failure
+                    if successStatus != nil {
+                        claudeStatus = failure.localizedDescription
+                    } else if !userInitiated, confirmedStatus != nil,
+                              failure == .silent || failure == .access {
+                        claudeStatus = failure.localizedDescription
+                    }
                     if failure == .access, !offeredAccess {
                         offeredAccess = true
                         showAccess = true
@@ -378,18 +394,39 @@ struct RecordPlayerMixer: View {
         let libraryGenre = snapshot.genre
         let libraryKey = MusicClaudeEQService.normalizeGenre(libraryGenre)
 
-        // Same genre + same output → keep EQ, skip Claude/API tokens.
+        // Same genre + same output → keep EQ curve, skip Claude/API tokens.
+        // Still reassert EQ On — Music sometimes leaves the equalizer off after a track change.
         if !libraryKey.isEmpty,
            libraryKey == currentGenreKey,
            outputKey == lastClaudeOutputKey,
            lastAppliedAdvice != nil {
             lastClaudeTrackID = snapshot.trackID
-            claudeStatus = "\(lastAppliedAdvice?.genre ?? libraryGenre) · mismo género · \(output.shortLabel)"
+            let status = "\(lastAppliedAdvice?.genre ?? libraryGenre) · mismo género · \(output.shortLabel)"
+            do {
+                try await equalizer.reassertPlayback()
+                if !Task.isCancelled {
+                    claudeStatus = status
+                    eqFailure = nil
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                let failure = (error as? MusicEqualizer.Failure) ?? .unresponsive
+                eqFailure = failure
+                claudeStatus = failure.localizedDescription
+                // Allow retry on the next tick / same track when latch was silent.
+                if failure == .silent || failure == .access || failure == .closed {
+                    lastClaudeTrackID = nil
+                }
+                if failure == .access, !offeredAccess {
+                    offeredAccess = true
+                    showAccess = true
+                }
+            }
             return
         }
         if !libraryKey.isEmpty,
            let cached = await claudeEQ.cachedAdvice(genre: libraryGenre, output: output) {
-            guard preferences.value.musicClaudeEQEnabled, active, !changingEQ else { return }
+            guard preferences.value.musicClaudeEQEnabled, active else { return }
             applyClaudeAdvice(cached, outputLabel: output.shortLabel, reused: true)
             currentGenreKey = libraryKey
             lastAppliedAdvice = cached
@@ -400,8 +437,8 @@ struct RecordPlayerMixer: View {
 
         try? await Task.sleep(for: .milliseconds(450))
         guard !Task.isCancelled else { return }
-        // User may have turned a knob (disables Claude) or started another write during the wait.
-        guard preferences.value.musicClaudeEQEnabled, active, !changingEQ else { return }
+        // Manual preempt flips Claude off; skip if the user already took ownership.
+        guard preferences.value.musicClaudeEQEnabled, active else { return }
         guard music.state.snapshot?.trackID == snapshot.trackID else { return }
         if presets.isEmpty { await loadPresets() }
         claudeStatus = "Claude EQ · \(output.shortLabel)…"
@@ -415,6 +452,8 @@ struct RecordPlayerMixer: View {
                 interactiveAuth: false
             )
             guard !Task.isCancelled, music.state.snapshot?.trackID == snapshot.trackID else { return }
+            // User may have grabbed Manual/knobs while Claude was thinking.
+            guard preferences.value.musicClaudeEQEnabled, active else { return }
             applyClaudeAdvice(advice, outputLabel: output.shortLabel, reused: false)
             currentGenreKey = !libraryKey.isEmpty ? libraryKey : MusicClaudeEQService.normalizeGenre(advice.genre)
             lastAppliedAdvice = advice
@@ -434,29 +473,44 @@ struct RecordPlayerMixer: View {
     }
 
     private func applyClaudeAdvice(_ advice: MusicClaudeEQService.Advice, outputLabel: String, reused: Bool) {
+        guard preferences.value.musicClaudeEQEnabled else { return }
         if let preset = advice.preset {
             // Don't preview Claude's numeric guess then replace it with the
             // factory preset averages — that "weird switch" looked like snap-back.
-            applyEQ(preview: gains) {
+            let status = reused
+                ? "\(advice.genre) · \(preset) · mismo género · \(outputLabel)"
+                : "\(advice.genre) · \(preset) · \(outputLabel) · \(advice.provider)"
+            claudeStatus = "Aplicando \(preset)…"
+            applyEQ(preview: gains, successStatus: status) {
+                guard preferences.value.musicClaudeEQEnabled else {
+                    throw MusicEqualizer.Failure.superseded
+                }
                 let result = try await equalizer.selectPreset(preset)
+                guard preferences.value.musicClaudeEQEnabled else {
+                    throw MusicEqualizer.Failure.superseded
+                }
                 selectedPreset = Self.claudeStyleName
                 return result
             }
-            claudeStatus = reused
-                ? "\(advice.genre) · \(preset) · mismo género · \(outputLabel)"
-                : "\(advice.genre) · \(preset) · \(outputLabel) · \(advice.provider)"
         } else {
             let target: [MixerBand: Double] = [
                 .bass: advice.bass, .mid: advice.mid, .treble: advice.treble
             ]
-            applyEQ(preview: target) {
+            let status = reused
+                ? "\(advice.genre) · bandas · mismo género · \(outputLabel)"
+                : "\(advice.genre) · bandas · \(outputLabel) · \(advice.provider)"
+            claudeStatus = "Aplicando bandas…"
+            applyEQ(preview: target, successStatus: status) {
+                guard preferences.value.musicClaudeEQEnabled else {
+                    throw MusicEqualizer.Failure.superseded
+                }
                 let result = try await equalizer.setAll(target)
+                guard preferences.value.musicClaudeEQEnabled else {
+                    throw MusicEqualizer.Failure.superseded
+                }
                 selectedPreset = Self.claudeStyleName
                 return result
             }
-            claudeStatus = reused
-                ? "\(advice.genre) · bandas · mismo género · \(outputLabel)"
-                : "\(advice.genre) · bandas · \(outputLabel) · \(advice.provider)"
         }
     }
 }

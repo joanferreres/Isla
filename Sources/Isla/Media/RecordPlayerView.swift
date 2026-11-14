@@ -131,8 +131,8 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                         diameter: selectorDiameter,
                         currentTitle: snapshot?.title,
                         currentArtist: snapshot?.artist,
-                        onPlay: { track, incoming in
-                            await loadDiscFromChanger(trackID: track.id, incoming: incoming)
+                        onPlay: { track, incoming, data in
+                            await loadDiscFromChanger(trackID: track.id, incoming: incoming, primed: data)
                         }
                     )
                     .id(changerEpoch)
@@ -153,7 +153,12 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
         }
         .onDisappear { speakerBattery.setVisible(false) }
         .onChange(of: music.state.artworkData, initial: true) { _, data in
-            artwork = data.flatMap(NSImage.init(data:))
+            if let image = data.flatMap(NSImage.init(data:)) {
+                artwork = image
+            } else if changerHandOff == nil {
+                // Mid hand-off: keep the incoming changer cover — don't flash the old/empty art.
+                artwork = nil
+            }
         }
         .onChange(of: music.state.snapshot?.trackID, initial: true) { previous, trackID in
             if trackID != nil {
@@ -168,7 +173,9 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                     manualRotation = 0
                     spinBias = 0
                     coastVelocity = 0
-                } else if changerHandOff != nil {
+                } else if let handOff = changerHandOff {
+                    // Land the chosen cover on the platter immediately, then dismiss the overlay.
+                    if let incoming = handOff.incoming { artwork = incoming }
                     let settle = reduceMotion ? nil : Animation.snappy(duration: 0.26)
                     withAnimation(settle) { changerHandOff = nil }
                     manualRotation = 0
@@ -631,8 +638,11 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
     }
 
     /// Animate the playing disc off the platter and the chosen disc onto it, then cue Music.
-    private func loadDiscFromChanger(trackID: String, incoming: NSImage?) async -> String? {
+    private func loadDiscFromChanger(trackID: String, incoming: NSImage?, primed: Data?) async -> String? {
         let outgoing = artwork
+        // Paint the main disc from the fan cover immediately — don't wait on Music.
+        if let incoming { artwork = incoming }
+        music.primeArtwork(primed, for: trackID)
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.55)) {
             changerHandOff = ChangerHandOff(outgoing: outgoing, incoming: incoming, progress: 0)
         }
@@ -644,11 +654,8 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
             try? await Task.sleep(for: .milliseconds(520))
         }
         do {
-            try await music.playPlaylistTrack(trackID)
-            // Keep the incoming art parked until Music reports the new track.
-            if changerHandOff != nil {
-                artwork = incoming ?? artwork
-            }
+            try await music.playPlaylistTrack(trackID, primedCover: primed)
+            if let incoming { artwork = incoming }
             return nil
         } catch {
             withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) {
