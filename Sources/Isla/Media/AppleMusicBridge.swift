@@ -36,7 +36,15 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
  tell application "Music"
  if player state is stopped then return {}
  set t to current track
- return {persistent ID of t, name of t, artist of t, (player state is playing), player position, duration of t}
+ set g to ""
+ try
+  set g to genre of t
+ end try
+ set art to ""
+ try
+  set art to raw data of artwork 1 of t
+ end try
+ return {persistent ID of t, name of t, artist of t, (player state is playing), player position, duration of t, g, art}
  end tell
  """
  case "artwork": source="""
@@ -339,8 +347,14 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
  else if operation == "volume", let descriptor, descriptor.descriptorType == typeSInt32 {
  reply.volume = Int(descriptor.int32Value)
  }
- else if operation == "read",let d=descriptor,d.numberOfItems == 6 {
- reply.snapshot=MediaSnapshot(trackID:d.atIndex(1)?.stringValue ?? "",title:d.atIndex(2)?.stringValue ?? "",artist:d.atIndex(3)?.stringValue ?? "",playing:d.atIndex(4)?.booleanValue ?? false,position:Double(d.atIndex(5)?.stringValue ?? "") ?? d.atIndex(5)?.doubleValue ?? 0,duration:Double(d.atIndex(6)?.stringValue ?? "") ?? d.atIndex(6)?.doubleValue ?? 0)
+ else if operation == "read",let d=descriptor,d.numberOfItems >= 6 {
+ let genre=d.numberOfItems >= 7 ? (d.atIndex(7)?.stringValue ?? "") : ""
+ let trackID=d.atIndex(1)?.stringValue ?? ""
+ reply.snapshot=MediaSnapshot(trackID:trackID,title:d.atIndex(2)?.stringValue ?? "",artist:d.atIndex(3)?.stringValue ?? "",playing:d.atIndex(4)?.booleanValue ?? false,position:Double(d.atIndex(5)?.stringValue ?? "") ?? d.atIndex(5)?.doubleValue ?? 0,duration:Double(d.atIndex(6)?.stringValue ?? "") ?? d.atIndex(6)?.doubleValue ?? 0,genre:genre)
+ if d.numberOfItems >= 8,let data=d.atIndex(8)?.data,NSImage(data:data) != nil {
+  reply.artwork=data
+  reply.artworkTrackID=trackID
+ }
  } else if operation == "artwork",let descriptor,descriptor.numberOfItems == 2,let data=descriptor.atIndex(2)?.data,NSImage(data:data) != nil { reply.artwork=data;reply.artworkTrackID=descriptor.atIndex(1)?.stringValue }
  else if operation == "neighbors", let descriptor, descriptor.numberOfItems == 4 {
   var neighbors = MusicNeighbors()
@@ -382,6 +396,12 @@ struct MusicReply:Codable,Sendable { var snapshot:MediaSnapshot?;var artwork:Dat
 protocol AppleMusicReading:Sendable {
  func isRunning() async -> Bool
  func read() async throws -> MediaSnapshot?
+ /// Memory hit without spawning the Music helper.
+ func cachedArtwork(trackID:String) async -> Data?
+ /// Seed persistent-ID cache from changer/UI so the main disc can paint before AppleScript returns.
+ func rememberCachedArtwork(_ data:Data, for trackID:String) async
+ /// Bind the latest MediaRemote cover to a Music persistent ID (no helper spawn).
+ func adoptSystemArtwork(for trackID:String) async
  func artwork(trackID:String) async throws -> Data?
  func neighbors() async throws -> MusicNeighbors?
  func send(_ command:MediaCommand) async throws
@@ -391,6 +411,9 @@ struct MusicFailure:LocalizedError { var message:String;var code:Int?=nil;var er
 actor AppleMusicBridge:AppleMusicReading {
  private var systemReply:MusicReply?
  private var retrySystemAfter=Date.distantPast
+ /// Persistent-ID → artwork bytes. Avoids re-spawning the helper for swipe/notch.
+ private var artworkCache:[String:Data]=[:]
+ private let artworkCacheLimit=48
 
  func isRunning() async -> Bool { await MainActor.run { !NSRunningApplication.runningApplications(withBundleIdentifier:"com.apple.Music").isEmpty } }
  func query(_ operation:String,argument:String?=nil) throws -> MusicReply {
@@ -407,11 +430,33 @@ actor AppleMusicBridge:AppleMusicReading {
  let reply=try JSONDecoder().decode(MusicReply.self,from:Data(contentsOf:file))
  if let error=reply.error { throw MusicFailure(message:error,code:reply.errorCode) };return reply
  }
+ private func rememberArtwork(_ data:Data?,for trackID:String?) {
+  guard let trackID,!trackID.isEmpty,let data,!data.isEmpty,NSImage(data:data) != nil else { return }
+  artworkCache[trackID]=data
+  if artworkCache.count > artworkCacheLimit {
+   artworkCache.removeValue(forKey:artworkCache.keys.first ?? trackID)
+  }
+ }
+ func cachedArtwork(trackID:String) async -> Data? {
+  if let hit=artworkCache[trackID] { return hit }
+  if let hit=systemReply?.artwork(for:trackID) { return hit }
+  return nil
+ }
+ func rememberCachedArtwork(_ data:Data, for trackID:String) {
+  rememberArtwork(data,for:trackID)
+ }
+ /// Map the latest MediaRemote cover onto a Music persistent ID so notch/swipe stay warm.
+ func adoptSystemArtwork(for trackID:String) {
+  guard !trackID.isEmpty,let data=systemReply?.artwork,!data.isEmpty else { return }
+  rememberArtwork(data,for:trackID)
+ }
  func read() async throws -> MediaSnapshot? {
  // Prefer AppleScript: stable Music persistent IDs for changer, EQ, playlists.
  // MediaRemote IDs (mediaremote:…) break those paths when used as the primary identity.
  do {
-  if let snapshot=try query("read").snapshot { return snapshot }
+  let reply=try query("read")
+  rememberArtwork(reply.artwork,for:reply.artworkTrackID ?? reply.snapshot?.trackID)
+  if let snapshot=reply.snapshot { return snapshot }
  } catch let failure as MusicFailure where failure.code == -1743 {
   throw failure
  } catch {
@@ -421,23 +466,39 @@ actor AppleMusicBridge:AppleMusicReading {
   do {
    let reply=try SystemMediaArtwork().read()
    systemReply=reply
+   rememberArtwork(reply?.artwork,for:reply?.artworkTrackID ?? reply?.snapshot?.trackID)
    if let snapshot=reply?.snapshot { return snapshot }
   } catch { retrySystemAfter=Date().addingTimeInterval(60);systemReply=nil }
  }
  return nil
  }
- func cacheSystemArtwork(_ reply:MusicReply) { systemReply=reply }
- func artwork(trackID:String) async throws -> Data? {
- if trackID.hasPrefix("mediaremote:") { return systemReply?.artwork(for:trackID) }
- if let cached=systemReply?.artwork, cached.isEmpty == false {
-  // MediaRemote cover often arrives before AppleScript artwork; reuse by title match via refresh path.
-  return try query("artwork").artwork(for:trackID) ?? cached
+ func cacheSystemArtwork(_ reply:MusicReply) {
+  systemReply=reply
+  rememberArtwork(reply.artwork,for:reply.artworkTrackID ?? reply.snapshot?.trackID)
  }
- return try query("artwork").artwork(for:trackID)
+ func artwork(trackID:String) async throws -> Data? {
+ if trackID.hasPrefix("mediaremote:") {
+  return await cachedArtwork(trackID:trackID) ?? systemReply?.artwork(for:trackID)
+ }
+ // Prefer a helper fetch so notch can upgrade MediaRemote bytes; fall back to cache.
+ do {
+  let data=try query("artwork").artwork(for:trackID)
+  rememberArtwork(data,for:trackID)
+  if let data { return data }
+ } catch {
+  if let hit=await cachedArtwork(trackID:trackID) { return hit }
+  throw error
+ }
+ return await cachedArtwork(trackID:trackID)
  }
  func neighbors() async throws -> MusicNeighbors? {
  // Playlist-relative peek via AppleScript. Radio / Autoplay / some cloud queues return nil.
- try query("neighbors").neighbors
+ let neighbors=try query("neighbors").neighbors
+ if let neighbors {
+  rememberArtwork(neighbors.nextArtwork,for:neighbors.nextTrackID)
+  rememberArtwork(neighbors.previousArtwork,for:neighbors.previousTrackID)
+ }
+ return neighbors
  }
  func volume(_ value: Int?) async throws -> Int {
  guard let volume = try query("volume", argument: value.map(String.init)).volume else {

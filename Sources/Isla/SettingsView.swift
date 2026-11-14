@@ -139,8 +139,11 @@ enum SettingsPage:String,CaseIterable,Identifiable {
  VStack(alignment:.leading,spacing:4) { Text("Codex").font(.headline);Text(usage.enabled ? "Conectado a tu sesión de Codex" : "Usa tu sesión de Codex en este Mac").font(.caption).foregroundStyle(.secondary) }
  }
  Toggle("Conectar Codex",isOn:$store.value.codexEnabled)
- Toggle("Mostrar Codex en Inicio",isOn:$store.value.showCodexOnHome)
- Text("El anillo rodea el logo y muestra el porcentaje consumido de la ventana corta. Pulsa en Inicio para ver los límites y sus reinicios.").font(.caption).foregroundStyle(.secondary)
+ Toggle("Mostrar Codex en Inicio",isOn:$store.value.showCodexOnHome).disabled(!usage.notchReady)
+ Text("El anillo rodea el logo y muestra el porcentaje consumido de la ventana corta. Solo aparece en el notch cuando la consulta de límites funciona.").font(.caption).foregroundStyle(.secondary)
+ if !usage.notchReady,store.value.codexEnabled {
+ Text("Codex no se muestra en el notch hasta que Actualizar devuelva límites.").font(.caption).foregroundStyle(.secondary)
+ }
  if let error=usage.error { Text(error).font(.caption).foregroundStyle(.orange) }
  if usage.enabled {
  HStack { Text(usage.stale ? "Última lectura guardada" : "Uso de la cuenta").font(.caption).foregroundStyle(.secondary);Spacer();Button("Actualizar") { Task { await usage.refresh() } }.disabled(usage.loading) }
@@ -235,7 +238,13 @@ private struct MusicAIEQKeySetup: View {
     try await advisor.saveClaudeAPIKey(claudeDraft)
     claudeDraft = ""
     hasClaudeKey = true
-    status = "API key de Claude guardada en el llavero."
+    status = "API key guardada — comprobando Claude (Haiku)…"
+    do {
+     try await advisor.verifyClaudeAPIKey()
+     status = "API key de Claude OK (Haiku responde)."
+    } catch {
+     status = "Key guardada, pero la prueba falló: \(error.localizedDescription)"
+    }
    },
    onClear: {
     await advisor.clearClaudeAPIKey()
@@ -266,7 +275,7 @@ private struct MusicAIEQKeySetup: View {
   if let status {
    Text(status).font(.caption2).foregroundStyle(.secondary)
   }
-  Text("Orden: Claude OAuth → key Claude → key ChatGPT (o ANTHROPIC_API_KEY / OPENAI_API_KEY en el entorno).")
+  Text("Orden EQ: key Claude (llavero) → OAuth Claude Code → key ChatGPT. Modelo: Haiku (barato).")
    .font(.caption2)
    .foregroundStyle(.secondary)
  }

@@ -25,6 +25,8 @@ import IslandCore
     private var coverTrail = RecordCoverTrail()
     private var lastCoverTrackID: String?
     private var pendingNavigation: RecordSwipe?
+    /// Cover known before Music confirms the new track (changer click / swipe).
+    private var primedArtwork: (trackID: String, data: Data)?
 
     init(reader: any AppleMusicReading = AppleMusicBridge()) { self.reader = reader }
 
@@ -114,7 +116,8 @@ import IslandCore
     }
 
     func refresh() async {
-        guard enabled, !refreshing else { return }
+        // -1743 stays latched until disconnect()/connect() so we do not spam Music.
+        guard enabled, !refreshing, !permissionDenied else { return }
         refreshing = true
         defer { refreshing = false }
         let current = generation
@@ -131,22 +134,35 @@ import IslandCore
             guard enabled, current == generation else { return }
             permissionDenied = false
             let changed = state.snapshot?.trackID != snapshot?.trackID
-            state.update(snapshot)
+            let primed: Data? = {
+                guard let snapshot, let primedArtwork, primedArtwork.trackID == snapshot.trackID else { return nil }
+                return primedArtwork.data
+            }()
+            state.update(snapshot, primedArtwork: primed)
+            if let snapshot, let primedArtwork, primedArtwork.trackID == snapshot.trackID {
+                self.primedArtwork = nil
+            }
             receivedAt = Date()
             error = nil
-            if let snapshot, changed || state.artworkData == nil {
-                let data = try await reader.artwork(trackID: snapshot.trackID)
-                let latest = try await reader.read()
-                guard enabled, current == generation else { return }
-                state.update(latest)
-                receivedAt = Date()
-                if let data, latest?.trackID == snapshot.trackID {
-                    _ = self.state.acceptArtwork(data, for: snapshot.trackID)
+            // Warm the persistent-ID cache from MediaRemote / changer, then paint without waiting on a helper.
+            if let snapshot, state.artworkData == nil || changed {
+                await reader.adoptSystemArtwork(for: snapshot.trackID)
+                if let quick = await reader.cachedArtwork(trackID: snapshot.trackID) {
+                    _ = state.acceptArtwork(quick, for: snapshot.trackID)
                 }
             }
             ingestCurrentCover(forceNeighbors: changed || neighborArt.nextTrackID == nil)
+            // Prefetch neighbors in parallel with any AppleScript artwork upgrade.
             if changed || neighborArt.nextTrackID == nil || neighborArt.previousTrackID == nil {
                 scheduleNeighborPrefetch(generation: current)
+            }
+            if let snapshot, changed || state.artworkData == nil {
+                if let data = try? await reader.artwork(trackID: snapshot.trackID),
+                   enabled, current == generation,
+                   state.snapshot?.trackID == snapshot.trackID {
+                    _ = state.acceptArtwork(data, for: snapshot.trackID)
+                    ingestCurrentCover(forceNeighbors: false)
+                }
             }
         } catch {
             guard enabled, current == generation else { return }
@@ -243,9 +259,24 @@ import IslandCore
         return try await reader.volume(value)
     }
 
-    func playPlaylistTrack(_ trackID: String) async throws {
+    /// Call on changer/swipe click with the cover already on the fan so the main disc
+    /// never keeps the previous track's art while Music/AppleScript catch up.
+    func primeArtwork(_ data: Data?, for trackID: String) {
+        guard !trackID.isEmpty, let data, !data.isEmpty else { return }
+        primedArtwork = (trackID, data)
+        Task { await reader.rememberCachedArtwork(data, for: trackID) }
+        if state.snapshot?.trackID == trackID {
+            _ = state.acceptArtwork(data, for: trackID)
+            ingestCurrentCover(forceNeighbors: false)
+        }
+    }
+
+    func playPlaylistTrack(_ trackID: String, primedCover: Data? = nil) async throws {
         guard enabled, !permissionDenied else {
             throw MusicFailure(message: "Conecta Apple Music para usar la cinta.")
+        }
+        if let primedCover {
+            primeArtwork(primedCover, for: trackID)
         }
         let playlists = MusicPlaylistService()
         try await playlists.play(trackID: trackID)

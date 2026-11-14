@@ -28,9 +28,21 @@ actor MusicClaudeEQService {
     }
 
     private let reader = AICredentialReader()
+    /// Per track+output (exact repeats).
     private var cache: [String: Advice] = [:]
+    /// Per Music/Claude genre+output — skips API when the next track shares the genre.
+    private var genreCache: [String: Advice] = [:]
+    /// Auto-EQ must stay on the cheapest Claude tier (Haiku). Never Sonnet/Opus — token burn for a JSON EQ tip.
     private let claudeModel = "claude-haiku-4-5-20251001"
+    /// Fallback when Claude auth is missing — also the cheap OpenAI tier.
     private let openAIModel = "gpt-4o-mini"
+
+    /// Normalize library / model genre labels for cheap equality checks.
+    static func normalizeGenre(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+    }
 
     func hasClaudeAPIKey() async -> Bool { await reader.hasStoredAnthropicAPIKey() }
     func hasOpenAIAPIKey() async -> Bool { await reader.hasStoredOpenAIAPIKey() }
@@ -44,27 +56,42 @@ actor MusicClaudeEQService {
     func saveAPIKey(_ key: String) async throws { try await saveClaudeAPIKey(key) }
     func clearAPIKey() async { await clearClaudeAPIKey() }
 
+    /// Reuse a prior EQ decision when Music (or Claude) already labeled this genre for this output.
+    func cachedAdvice(genre: String, output: MusicAudioOutput) -> Advice? {
+        let key = Self.normalizeGenre(genre)
+        guard !key.isEmpty else { return nil }
+        return genreCache[genreOutputKey(key, output: output)]
+    }
+
     func advise(
         title: String,
         artist: String,
         presets: [String],
         output: MusicAudioOutput,
+        musicGenre: String = "",
         interactiveAuth: Bool = false
     ) async throws -> Advice {
         let key = cacheKey(title: title, artist: artist, output: output)
-        if let cached = cache[key] { return cached }
+        if let cached = cache[key] {
+            rememberGenre(cached, musicGenre: musicGenre, output: output)
+            return cached
+        }
+        if let byGenre = cachedAdvice(genre: musicGenre, output: output) {
+            cache[key] = byGenre
+            return byGenre
+        }
 
-        let prompt = advicePrompt(title: title, artist: artist, presets: presets, output: output)
+        let prompt = advicePrompt(title: title, artist: artist, presets: presets, output: output, musicGenre: musicGenre)
         var lastAuth: String?
         var lastNetwork: String?
 
-        // 1) Claude — OAuth or Anthropic API key.
+        // 1) Claude — Isla API key preferred, then OAuth (Haiku).
         do {
             let auth = try await reader.claudeAPIAuth(interactive: interactiveAuth)
             var advice = try await askClaude(auth: auth, system: prompt.system, user: prompt.user, presets: presets)
-            advice.provider = "Claude"
+            advice.provider = "Claude·Haiku"
             advice = output.adapted(advice)
-            remember(advice, key: key)
+            remember(advice, key: key, musicGenre: musicGenre, output: output)
             return advice
         } catch let failure as Failure {
             switch failure {
@@ -80,9 +107,9 @@ actor MusicClaudeEQService {
         do {
             let openAIKey = try await reader.openAIAPIKey()
             var advice = try await askOpenAI(apiKey: openAIKey, system: prompt.system, user: prompt.user, presets: presets)
-            advice.provider = "ChatGPT"
+            advice.provider = "ChatGPT·mini"
             advice = output.adapted(advice)
-            remember(advice, key: key)
+            remember(advice, key: key, musicGenre: musicGenre, output: output)
             return advice
         } catch let failure as Failure {
             throw failure
@@ -98,7 +125,8 @@ actor MusicClaudeEQService {
         title: String,
         artist: String,
         presets: [String],
-        output: MusicAudioOutput
+        output: MusicAudioOutput,
+        musicGenre: String
     ) -> (system: String, user: String) {
         let presetList = presets.filter { !$0.isEmpty && $0.caseInsensitiveCompare("Manual") != .orderedSame }
             .prefix(40)
@@ -112,14 +140,20 @@ actor MusicClaudeEQService {
         Keep gains subtle (−6…+6) unless the genre clearly needs more.
         Adapt the curve to this output: \(output.promptHint)
         """
-        let user = "Track: \"\(title)\" by \"\(artist.isEmpty ? "unknown" : artist)\". Output: \(output.shortLabel)."
+        let genreHint = musicGenre.trimmingCharacters(in: .whitespacesAndNewlines)
+        let user: String
+        if genreHint.isEmpty {
+            user = "Track: \"\(title)\" by \"\(artist.isEmpty ? "unknown" : artist)\". Output: \(output.shortLabel)."
+        } else {
+            user = "Track: \"\(title)\" by \"\(artist.isEmpty ? "unknown" : artist)\". Library genre: \"\(genreHint)\". Output: \(output.shortLabel)."
+        }
         return (system, user)
     }
 
     private func askClaude(auth: ClaudeAPIAuth, system: String, user: String, presets: [String]) async throws -> Advice {
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         request.httpMethod = "POST"
-        request.timeoutInterval = 20
+        request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         switch auth {
@@ -137,7 +171,13 @@ actor MusicClaudeEQService {
             "messages": [["role": "user", "content": user]],
         ] as [String: Any])
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await AIHTTPClient.data(for: request, attempts: 3)
+        } catch {
+            throw Failure.network(error.localizedDescription)
+        }
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200...299).contains(code) else {
             let snippet = String(data: data, encoding: .utf8)?.prefix(180) ?? ""
@@ -153,7 +193,7 @@ actor MusicClaudeEQService {
     private func askOpenAI(apiKey: String, system: String, user: String, presets: [String]) async throws -> Advice {
         var request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
         request.httpMethod = "POST"
-        request.timeoutInterval = 20
+        request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
@@ -166,7 +206,13 @@ actor MusicClaudeEQService {
             ],
         ] as [String: Any])
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await AIHTTPClient.data(for: request, attempts: 3)
+        } catch {
+            throw Failure.network(error.localizedDescription)
+        }
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200...299).contains(code) else {
             let snippet = String(data: data, encoding: .utf8)?.prefix(180) ?? ""
@@ -179,15 +225,68 @@ actor MusicClaudeEQService {
         return advice
     }
 
-    private func remember(_ advice: Advice, key: String) {
+    /// Tiny Messages probe after saving a key — surfaces TLS/auth errors immediately in Ajustes.
+    func verifyClaudeAPIKey() async throws {
+        let auth = try await reader.claudeAPIAuth(interactive: false)
+        var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        switch auth {
+        case .oauth(let token):
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        case .apiKey(let key):
+            request.setValue(key, forHTTPHeaderField: "x-api-key")
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": claudeModel,
+            "max_tokens": 1,
+            "messages": [["role": "user", "content": "ping"]],
+        ] as [String: Any])
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await AIHTTPClient.data(for: request, attempts: 3)
+        } catch {
+            throw Failure.network(error.localizedDescription)
+        }
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if [401, 403].contains(code) {
+            throw Failure.auth("Claude rechazó la API key (\(code)). Comprueba que sea sk-ant-… válida.")
+        }
+        guard (200...299).contains(code) else {
+            let snippet = String(data: data, encoding: .utf8)?.prefix(120) ?? ""
+            throw Failure.network("Claude API \(code): \(snippet)")
+        }
+    }
+
+    private func remember(_ advice: Advice, key: String, musicGenre: String, output: MusicAudioOutput) {
         cache[key] = advice
         if cache.count > 80 {
             cache.removeValue(forKey: cache.keys.first ?? key)
+        }
+        rememberGenre(advice, musicGenre: musicGenre, output: output)
+    }
+
+    private func rememberGenre(_ advice: Advice, musicGenre: String, output: MusicAudioOutput) {
+        let fromLibrary = Self.normalizeGenre(musicGenre)
+        let fromModel = Self.normalizeGenre(advice.genre)
+        for label in [fromLibrary, fromModel] where !label.isEmpty {
+            let key = genreOutputKey(label, output: output)
+            genreCache[key] = advice
+        }
+        if genreCache.count > 60 {
+            genreCache.removeValue(forKey: genreCache.keys.first ?? "")
         }
     }
 
     private func cacheKey(title: String, artist: String, output: MusicAudioOutput) -> String {
         "\(title.lowercased())|\(artist.lowercased())|\(output.kind.rawValue)|\(output.uid.lowercased())"
+    }
+
+    private func genreOutputKey(_ normalizedGenre: String, output: MusicAudioOutput) -> String {
+        "\(normalizedGenre)|\(output.kind.rawValue)|\(output.uid.lowercased())"
     }
 
     private func claudeText(from data: Data) -> String? {

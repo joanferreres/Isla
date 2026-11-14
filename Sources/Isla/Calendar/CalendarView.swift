@@ -61,10 +61,12 @@ import IslandCore
  @ObservedObject var preferences:PreferencesStore
  @ObservedObject var usage:CodexUsageService
  @ObservedObject var activity:CodexActivityService
+ @ObservedObject private var cursor=AIUsageAccounts.shared.cursor
+ @ObservedObject private var claude=AIUsageAccounts.shared.claude
  let openCodex:(String) -> Void
  var body:some View {
  let playing=music.state.snapshot?.playing == true
- let showAI=preferences.value.showCodexOnHome || (preferences.value.cursorEnabled && preferences.value.showCursorOnHome) || (preferences.value.claudeEnabled && preferences.value.showClaudeOnHome)
+ let showAI=AIHomeRow.showsAny(preferences:preferences.value,usage:usage,cursor:cursor,claude:claude)
  VStack(spacing:8) {
  GeometryReader { space in
  HStack(alignment:.top,spacing:16) {

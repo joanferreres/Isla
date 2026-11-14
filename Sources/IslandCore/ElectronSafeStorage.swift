@@ -12,6 +12,23 @@ public enum ElectronSafeStorage {
  }
 
  public static func decrypt(_ blob:Data,password:String) throws -> String {
+  let plain=try decryptBytes(blob,password:password)
+  guard let text=String(data:plain,encoding:.utf8),!text.isEmpty else { throw Failure() }
+  return text
+ }
+
+ /// Chromium cookie values (Claude Desktop, etc.): `v10` + AES-CBC, often with a 32-byte host hash prefix.
+ public static func chromeCookieValue(_ blob:Data,password:String) throws -> String {
+  let plain=try decryptBytes(blob,password:password)
+  // Chrome 127+ prefixes a SHA-256 host key; prefer the suffix when it is clean UTF-8.
+  if plain.count>32,let text=String(data:plain.dropFirst(32),encoding:.utf8),!text.isEmpty,!text.contains("\0") {
+   return text
+  }
+  guard let text=String(data:plain,encoding:.utf8),!text.isEmpty,!text.contains("\0") else { throw Failure() }
+  return text
+ }
+
+ private static func decryptBytes(_ blob:Data,password:String) throws -> Data {
   guard blob.count>3,String(data:blob.prefix(3),encoding:.utf8)=="v10" else { throw Failure() }
   let cipher=blob.dropFirst(3)
   var key=Data(count:kCCKeySizeAES128)
@@ -58,8 +75,8 @@ public enum ElectronSafeStorage {
     }
    }
   }
-  guard status==kCCSuccess,moved>0,let text=String(data:output.prefix(moved),encoding:.utf8),!text.isEmpty else { throw Failure() }
-  return text
+  guard status==kCCSuccess,moved>0 else { throw Failure() }
+  return output.prefix(moved)
  }
 
  public struct Failure:LocalizedError {

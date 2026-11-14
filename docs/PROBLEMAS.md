@@ -50,9 +50,13 @@ Necesitas **Accesibilidad** para Isla. Ve a **Privacidad y seguridad → Accesib
 
 Activa Calendario, revisa el permiso y los calendarios seleccionados. Si lo has denegado, cámbialo manualmente en **Privacidad y seguridad → Calendarios**. La app no debe pedirlo de forma repetida.
 
+## Los mandos de graves/medios/agudos vuelven solos
+
+Si el estilo era un preset de Música o Claude y al tocar un mando volvían a otra posición, era un refresco que leía el preset **Manual** antiguo en lugar de la curva activa. Desde 0.8.77 Isla lee el preset (o los deslizadores) que Música está usando, escribe las tres bandas juntas al ajustar a mano y no deja que Claude pise un ajuste en curso.
+
 ## No aparecen límites de una IA
 
-Debes iniciar sesión con tu propia cuenta en la aplicación correspondiente y activar la conexión. macOS puede pedir acceso al **llavero** (Claude Code-credentials / Cursor Safe Storage): acéptalo o Isla no podrá leer la sesión. Una sesión caducada o un cambio del servicio puede impedir la lectura. No envíes tokens, archivos de autenticación ni contraseñas para pedir ayuda.
+Debes iniciar sesión con tu propia cuenta en la aplicación correspondiente y activar la conexión. macOS puede pedir acceso al **llavero** (Claude Safe Storage / Claude Code-credentials / Cursor Safe Storage): acéptalo o Isla no podrá leer la sesión. Una sesión caducada o un cambio del servicio puede impedir la lectura. Codex, Cursor y Claude **solo se muestran en el notch** cuando la consulta de límites funciona; hasta entonces configúralos en **Ajustes → IA**. No envíes tokens, archivos de autenticación ni contraseñas para pedir ayuda.
 
 ## El efecto de tapa no aparece
 
