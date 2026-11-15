@@ -40,11 +40,14 @@ struct MusicAudioOutput: Equatable, Sendable {
         }
     }
 
+    static let unknown = Self(kind: .other, name: "Salida", uid: "")
+
     static func current() -> Self {
         var device = AudioDeviceID(kAudioObjectUnknown)
         guard read(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultOutputDevice, into: &device),
-              device != kAudioObjectUnknown else {
-            return Self(kind: .other, name: "Desconocida", uid: "")
+              device != kAudioObjectUnknown,
+              device != 0 else {
+            return .unknown
         }
 
         var transport: UInt32 = 0
@@ -59,10 +62,12 @@ struct MusicAudioOutput: Equatable, Sendable {
             ? (nameRef?.takeRetainedValue() as String? ?? "Salida")
             : "Salida"
         let lowered = name.lowercased()
-        let source = dataSourceName(device)?.lowercased() ?? ""
+        // Do not query kAudioDevicePropertyDataSourceNameForID — on some macOS
+        // builds / devices CoreAudio's HAL SIGSEGVs inside GetPropertyData, and
+        // that killed Isla the moment the turntable mixer appeared.
 
         let kind: MusicAudioOutputKind
-        if looksLikeAirPods(lowered) || looksLikeAirPods(source) {
+        if looksLikeAirPods(lowered) {
             kind = .airPods
         } else if transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE {
             kind = looksLikeHeadphones(lowered) ? .headphones : .bluetooth
@@ -70,15 +75,9 @@ struct MusicAudioOutput: Equatable, Sendable {
                     || lowered.contains("macbook")
                     || lowered.contains("imac")
                     || lowered.contains("speaker")
-                    || lowered.contains("altavoz")
-                    || source.contains("speaker")
-                    || source.contains("altavoz") {
-            if looksLikeHeadphones(lowered) || looksLikeHeadphones(source) {
-                kind = .headphones
-            } else {
-                kind = .builtInSpeakers
-            }
-        } else if looksLikeHeadphones(lowered) || looksLikeHeadphones(source) {
+                    || lowered.contains("altavoz") {
+            kind = looksLikeHeadphones(lowered) ? .headphones : .builtInSpeakers
+        } else if looksLikeHeadphones(lowered) {
             kind = .headphones
         } else {
             kind = .other
@@ -118,46 +117,25 @@ struct MusicAudioOutput: Equatable, Sendable {
         min(12, max(-12, value.rounded()))
     }
 
-    private static func dataSourceName(_ device: AudioDeviceID) -> String? {
-        var source: UInt32 = 0
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDataSource,
-            mScope: kAudioObjectPropertyScopeOutput,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var size = UInt32(MemoryLayout<UInt32>.size)
-        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &source) == noErr else { return nil }
-
-        var nameAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDataSourceNameForID,
-            mScope: kAudioObjectPropertyScopeOutput,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var name: Unmanaged<CFString>?
-        var nameSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
-        var qualifier = source
-        let qualifierSize = UInt32(MemoryLayout<UInt32>.size)
-        guard AudioObjectGetPropertyData(device, &nameAddress, qualifierSize, &qualifier, &nameSize, &name) == noErr,
-              let name else { return nil }
-        return name.takeRetainedValue() as String
-    }
-
     private static func read<T>(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, into value: inout T) -> Bool {
         var address = AudioObjectPropertyAddress(
             mSelector: selector,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
+        guard AudioObjectHasProperty(object, &address) else { return false }
         var size = UInt32(MemoryLayout<T>.size)
         return withUnsafeMutableBytes(of: &value) { buffer in
-            AudioObjectGetPropertyData(object, &address, 0, nil, &size, buffer.baseAddress!) == noErr
+            guard let base = buffer.baseAddress else { return false }
+            return AudioObjectGetPropertyData(object, &address, 0, nil, &size, base) == noErr
         }
     }
 }
 
 /// Publishes the default output route so Claude EQ can re-tune on AirPods ↔ speakers.
 @MainActor final class MusicAudioOutputMonitor: ObservableObject {
-    @Published private(set) var output = MusicAudioOutput.current()
+    /// Start inert — probing CoreAudio during SwiftUI StateObject init has crashed the HAL.
+    @Published private(set) var output = MusicAudioOutput.unknown
 
     private var listener: AudioObjectPropertyListenerBlock?
     private var address = AudioObjectPropertyAddress(
@@ -169,12 +147,13 @@ struct MusicAudioOutput: Equatable, Sendable {
     func setActive(_ active: Bool) {
         let system = AudioObjectID(kAudioObjectSystemObject)
         if active, listener == nil {
+            refresh()
             let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
                 Task { @MainActor in self?.refresh() }
             }
-            guard AudioObjectAddPropertyListenerBlock(system, &address, .main, block) == noErr else { return }
-            listener = block
-            refresh()
+            if AudioObjectAddPropertyListenerBlock(system, &address, .main, block) == noErr {
+                listener = block
+            }
         } else if !active, let listener {
             AudioObjectRemovePropertyListenerBlock(system, &address, .main, listener)
             self.listener = nil
