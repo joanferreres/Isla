@@ -13,7 +13,7 @@ struct RecordEntry: TimelineEntry {
 
 struct RecordProvider: TimelineProvider {
     func placeholder(in context: Context) -> RecordEntry {
-        RecordEntry(title: "Tocadiscos", artist: "Apple Music", playing: true)
+        RecordEntry(title: "Tocadiscos", artist: "Apple Music o Spotify", playing: true)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (RecordEntry) -> Void) {

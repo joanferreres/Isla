@@ -38,7 +38,7 @@ struct RecordDesktopView: View {
                 Text(snapshot?.title ?? "Sin música")
                     .font(.callout.weight(.semibold))
                     .lineLimit(1)
-                Text(snapshot?.artist ?? "Apple Music")
+                Text(snapshot?.artist ?? music.sourceTitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

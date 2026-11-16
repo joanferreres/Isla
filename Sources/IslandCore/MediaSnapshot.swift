@@ -1,4 +1,9 @@
 import Foundation
+public enum MediaSource:String,Codable,CaseIterable,Sendable {
+ case appleMusic,spotify
+ public var title:String { switch self { case .appleMusic:"Apple Music";case .spotify:"Spotify" } }
+ public var symbol:String { switch self { case .appleMusic:"music.note";case .spotify:"waveform.circle.fill" } }
+}
 public struct MediaSnapshot:Codable,Equatable,Sendable {
  public var trackID:String
  public var title:String
@@ -6,12 +11,13 @@ public struct MediaSnapshot:Codable,Equatable,Sendable {
  public var playing:Bool
  public var position:Double
  public var duration:Double
+ public var source:MediaSource
  /// Apple Music `genre` when the library provides one (empty for many streams).
  public var genre:String
- public init(trackID:String,title:String,artist:String,playing:Bool,position:Double,duration:Double,genre:String="") {
-  self.trackID=trackID;self.title=title;self.artist=artist;self.playing=playing;self.position=position;self.duration=duration;self.genre=genre
+ public init(trackID:String,title:String,artist:String,playing:Bool,position:Double,duration:Double,genre:String="",source:MediaSource = .appleMusic) {
+  self.trackID=trackID;self.title=title;self.artist=artist;self.playing=playing;self.position=position;self.duration=duration;self.genre=genre;self.source=source
  }
- enum CodingKeys:String,CodingKey { case trackID,title,artist,playing,position,duration,genre }
+ enum CodingKeys:String,CodingKey { case trackID,title,artist,playing,position,duration,genre,source }
  public init(from decoder:Decoder) throws {
   let c=try decoder.container(keyedBy:CodingKeys.self)
   trackID=try c.decode(String.self,forKey:.trackID)
@@ -21,6 +27,7 @@ public struct MediaSnapshot:Codable,Equatable,Sendable {
   position=try c.decode(Double.self,forKey:.position)
   duration=try c.decode(Double.self,forKey:.duration)
   genre=try c.decodeIfPresent(String.self,forKey:.genre) ?? ""
+ source=try c.decodeIfPresent(MediaSource.self,forKey:.source) ?? .appleMusic
  }
 }
 public enum MediaCommand:Sendable { case previous,playPause,pause,next,cue(seconds:Double) }

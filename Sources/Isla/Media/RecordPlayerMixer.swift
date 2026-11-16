@@ -31,15 +31,19 @@ struct RecordPlayerMixer: View {
 
     /// Style entry in the EQ menu — enables Claude auto-EQ (not a Music factory preset).
     private static let claudeStyleName = "Claude"
+    private var supportsEQ:Bool { music.state.snapshot?.source != .spotify }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if supportsEQ {
             HStack(spacing: 8) {
                 presetMenu
                 Spacer(minLength: 0)
                 resetButton
             }
+            }
             HStack(spacing: 15) {
+                if supportsEQ {
                 VStack(spacing: 7) {
                     ForEach(MixerBand.allCases, id: \.self) { band in
                         EQKnob(title: band.title, gain: gains[band], accent: palette.accent) { value in
@@ -48,10 +52,11 @@ struct RecordPlayerMixer: View {
                         .disabled(!active)
                     }
                 }
+                }
                 volumeFader
             }
             .fixedSize(horizontal: false, vertical: true)
-            if preferences.value.musicClaudeEQEnabled {
+            if supportsEQ,preferences.value.musicClaudeEQEnabled {
                 Text(claudeStatus ?? "Estilo Claude — EQ según música y salida (\(audioOutput.output.shortLabel))")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -73,10 +78,11 @@ struct RecordPlayerMixer: View {
         } message: {
             Text(MusicEqualizer.Failure.access.localizedDescription)
         }
-        .task(id: active) {
+        .task(id: "\(active)|\(supportsEQ)|\(music.sourceTitle)") {
             audioOutput.setActive(active)
             guard active else { return }
             await readVolume()
+            guard supportsEQ else { return }
             await loadPresets()
             if let current = try? await equalizer.read(), !Task.isCancelled {
                 gains = current
@@ -131,7 +137,7 @@ struct RecordPlayerMixer: View {
 
     private var autoEQTaskID: String {
         let track = music.state.snapshot?.trackID ?? ""
-        let enabled = preferences.value.musicClaudeEQEnabled && active && music.enabled
+        let enabled = supportsEQ && preferences.value.musicClaudeEQEnabled && active && music.enabled
         let route = "\(audioOutput.output.kind.rawValue)|\(audioOutput.output.uid)"
         return "\(enabled)|\(track)|\(route)"
     }
@@ -242,7 +248,7 @@ struct RecordPlayerMixer: View {
                 .font(.caption2.monospacedDigit())
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Volumen de Música")
+        .accessibilityLabel("Volumen de (music.sourceTitle)")
         .accessibilityValue(volume.map { "\($0) por ciento" } ?? "No disponible")
         .accessibilityAdjustableAction { direction in
             guard let volume else { return }

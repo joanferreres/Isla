@@ -2,6 +2,22 @@ import XCTest
 import AppKit
 @testable import Isla
 @MainActor final class LocalStoreTests: XCTestCase {
+ func testShelfExportsAnActualFileForFinderAndSharing() async throws {
+  let file=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString+".txt")
+  try Data("tray export".utf8).write(to:file)
+  defer { try? FileManager.default.removeItem(at:file) }
+  let provider=ShelfService.dragProvider(for:file)
+  XCTAssertEqual(provider.suggestedName,file.lastPathComponent)
+  let exported:URL=try await withCheckedThrowingContinuation { continuation in
+   provider.loadInPlaceFileRepresentation(forTypeIdentifier:"public.item") { url,_,error in
+    if let error { continuation.resume(throwing:error) }
+    else if let url { continuation.resume(returning:url) }
+    else { continuation.resume(throwing:CocoaError(.fileReadUnknown)) }
+   }
+  }
+  XCTAssertEqual(try Data(contentsOf:exported),Data("tray export".utf8))
+  XCTAssertTrue(FileManager.default.fileExists(atPath:file.path))
+ }
  func testFileDroppedDuringLoadIsRetained() async throws {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   defer { try? FileManager.default.removeItem(at: directory) }

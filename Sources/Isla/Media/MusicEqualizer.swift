@@ -34,6 +34,7 @@ struct MusicEqualizerScale {
     let unitsPerDecibel: Double
     init(maximum: Double?) { unitsPerDecibel = maximum == 12 ? 1 : 100 }
     func decibels(_ value: Double) -> Double { value / unitsPerDecibel }
+    func nativeValue(_ decibels: Double) -> Double { decibels * unitsPerDecibel }
 }
 
 /// Single owner for Music EQ apply.

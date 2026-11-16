@@ -36,7 +36,7 @@ Concede solo lo que uses. Ruta base: **Ajustes del Sistema → Privacidad y segu
 ### Orden recomendado
 
 1. Instala **Isla.app** en **Aplicaciones** y ábrela una vez (si Gatekeeper avisa, [Abrir igualmente](#primer-aviso-de-macos)).
-2. Menú de Isla → **Ajustes → Módulos** → activa **Apple Music** y reproduce una canción en la app Música.
+2. Menú de Isla → **Ajustes → Módulos** → activa **Música**, elige Apple Music, Spotify o Automática y reproduce una canción.
 3. Si macOS pide controlar Música, acepta; si no, ve a **Automatización** y marca **Music** para Isla.
 4. Abre el tocadiscos y gira un mando del EQ. Si pide Accesibilidad, actívala y vuelve a intentarlo.
 5. (Opcional) **EQ con IA**: interruptor en Ajustes → Música, o estilo **Claude** en el tocadiscos. Guarda keys en el llavero o usa `claude auth login`.
@@ -50,8 +50,8 @@ Abre Isla desde su icono de la barra de menús y entra en **Ajustes**. En la isl
 
 | Función | Configuración y permiso |
 | --- | --- |
-| Funciones | En **Ajustes → Módulos → Funciones**: interruptores para Apple Music, **EQ con IA**, Calendario, bandeja de archivos, tocadiscos en el escritorio y efecto de tapa. |
-| Música | Activa Apple Music. Concede **Automatización → Music**. |
+| Funciones | En **Ajustes → Módulos → Funciones**: música con fuente Apple Music / Spotify / Automática, **EQ con IA**, Calendario, bandeja de archivos, tocadiscos en el escritorio y efecto de tapa. |
+| Música | Activa Música. Concede **Automatización → Music** o **Spotify** según la fuente. |
 | EQ con IA | Interruptor **EQ con IA** en Funciones; keys de Claude/ChatGPT en **Música e IA EQ** (llavero). También con el estilo **Claude** del tocadiscos. Orden: OAuth Claude Code → key Claude → key ChatGPT. |
 | Tocadiscos | Pulsa el disco junto a la luna. El botón verde lo abre a pantalla completa. Sobre el vinilo, arrastra o desliza dos dedos a la izquierda para avanzar y a la derecha para retroceder. Mantén pulsado ⌘ para ver los diez ambientes. El fader vertical ajusta el volumen de Música. Si la salida Bluetooth publica su batería, el porcentaje aparece junto a ⌘. Gira los mandos para ajustar el ecualizador o pulsa la flecha circular sobre ellos para volver a sonido plano. La primera vez, activa Isla en **Accesibilidad** y vuelve a girar el mando. |
 | Archivos | Arrastra archivos de Finder al notch para abrir la bandeja. Suelta en la bandeja para guardar un acceso al original, o en AirDrop para elegir un destinatario. Arrastra un archivo desde la bandeja para usarlo en otra app. |

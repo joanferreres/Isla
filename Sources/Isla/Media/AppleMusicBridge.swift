@@ -406,6 +406,16 @@ protocol AppleMusicReading:Sendable {
  func neighbors() async throws -> MusicNeighbors?
  func send(_ command:MediaCommand) async throws
  func volume(_ value: Int?) async throws -> Int
+ func shuffle(_ value:Bool?) async throws -> Bool
+ func setSourcePreference(_ preference:MusicSourcePreference) async
+ func activeSource() async -> MediaSource?
+ func cacheSystemArtwork(_ reply:MusicReply) async
+}
+extension AppleMusicReading {
+ func shuffle(_ value:Bool?) async throws -> Bool { throw MusicFailure(message:"El modo aleatorio no está disponible.") }
+ func setSourcePreference(_ preference:MusicSourcePreference) async {}
+ func activeSource() async -> MediaSource? { .appleMusic }
+ func cacheSystemArtwork(_ reply:MusicReply) async {}
 }
 struct MusicFailure:LocalizedError { var message:String;var code:Int?=nil;var errorDescription:String? { message } }
 actor AppleMusicBridge:AppleMusicReading {
@@ -504,6 +514,11 @@ actor AppleMusicBridge:AppleMusicReading {
  guard let volume = try query("volume", argument: value.map(String.init)).volume else {
  throw MusicFailure(message: "Abre Música para controlar su volumen.")
  }
+ func shuffle(_ value:Bool?) async throws -> Bool {
+  if let value { return try query("setShuffle",argument:value ? "1" : "0").shuffleEnabled ?? value }
+  return try query("shuffleState").shuffleEnabled ?? false
+ }
+ func activeSource() async -> MediaSource? { .appleMusic }
  return volume
  }
  func send(_ command:MediaCommand) async throws {

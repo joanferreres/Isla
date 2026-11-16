@@ -23,7 +23,7 @@ import QuickLookThumbnailing
  Text(item.url.lastPathComponent).font(.system(size:10,weight:.medium)).lineLimit(2).multilineTextAlignment(.center).frame(width:72)
  }.frame(width:76,height:78).opacity(exists ? 1 : 0.4)
  .onTapGesture(count:2) { if exists { NSWorkspace.shared.open(item.url) } }
- .onDrag { NSItemProvider(object:item.url as NSURL) }
+ .onDrag { ShelfService.dragProvider(for:item.url) }
  .contextMenu {
  Button("Abrir") { NSWorkspace.shared.open(item.url) }.disabled(!exists)
  Button("Mostrar en Finder") { NSWorkspace.shared.activateFileViewerSelecting([item.url]) }.disabled(!exists)
@@ -59,6 +59,11 @@ import QuickLookThumbnailing
  .foregroundStyle(airDropTargeted ? .mint : .gray)
  .background(airDropTargeted ? Color.mint.opacity(0.12) : .white.opacity(0.04),in:RoundedRectangle(cornerRadius:18))
  .overlay(RoundedRectangle(cornerRadius:18).strokeBorder(airDropTargeted ? Color.mint : .white.opacity(0.12),style:StrokeStyle(lineWidth:1.5,dash:[5,5])))
+ .dropDestination(for:URL.self) { urls,_ in
+  airDrop.send(urls,model:model)
+ } isTargeted: { active in
+  if active { model.trackFileDrop(at:CGPoint(x:model.airDropFrame.midX,y:model.airDropFrame.midY)) }
+ }
  .onGeometryChange(for:CGRect.self) { $0.frame(in:.named("island")) } action: { model.airDropFrame=$0 }
  .onDisappear { model.airDropFrame = .null }
  .accessibilityLabel("AirDrop: arrastra archivos para elegir un destinatario")

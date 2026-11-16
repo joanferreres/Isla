@@ -1,6 +1,10 @@
 import XCTest
 @testable import IslandCore
 final class MediaStateTests:XCTestCase {
+ func testOlderSnapshotDefaultsToAppleMusicSource() throws {
+  let data=Data(#"{"trackID":"1","title":"Song","artist":"Artist","playing":false,"position":0,"duration":10,"genre":""}"#.utf8)
+  XCTAssertEqual(try JSONDecoder().decode(MediaSnapshot.self,from:data).source,.appleMusic)
+ }
  func testOldArtworkCannotReplaceCurrentTrack() {
  var state=MediaState()
  state.update(MediaSnapshot(trackID:"A",title:"A",artist:"",playing:true,position:0,duration:60))

@@ -13,7 +13,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.8.80</string>
+	<string>0.8.81</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -26,13 +26,13 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>110</string>
+	<string>111</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>15.0</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Isla muestra la carátula y permite controlar la reproducción de Apple Music.</string>
+	<string>Isla muestra la carátula y permite controlar la reproducción de Apple Music y Spotify.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Isla muestra tus eventos y próximos compromisos. No modifica el calendario.</string>
 	<key>NSHighResolutionCapable</key>

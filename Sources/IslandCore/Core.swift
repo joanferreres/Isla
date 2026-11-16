@@ -22,11 +22,16 @@ public enum AINotificationMode:String,Codable,CaseIterable,Sendable {
  public var icon:String { switch self { case .sound:"bell.badge";case .visual:"moon";case .none:"moon.fill" } }
  public var next:Self { switch self { case .sound:.visual;case .visual:.none;case .none:.sound } }
 }
+public enum MusicSourcePreference:String,Codable,CaseIterable,Sendable {
+ case automatic,appleMusic,spotify
+ public var title:String { switch self { case .automatic:"Automática";case .appleMusic:"Apple Music";case .spotify:"Spotify" } }
+}
 public struct Preferences: Codable, Equatable {
  public var reduceMotion = false
  public var expandedWidth: Double = 640
  public var showOnAllDisplays = true
  public var musicEnabled = false
+ public var musicSource:MusicSourcePreference = .automatic
  /// Auto-pick EQ from track genre via Claude (toggle in Ajustes → Módulos).
  public var musicClaudeEQEnabled = true
  public var calendarEnabled = false
@@ -54,13 +59,14 @@ public struct Preferences: Codable, Equatable {
  public var screenshotClipboardEnabled=true
  public var selectedCalendarIDs: [String] = []
  public init() {}
- enum CodingKeys: String, CodingKey { case cursorEnabled,claudeEnabled,showCursorOnHome,showClaudeOnHome,screenshotsEnabled,screenshotClipboardEnabled,notificationMode,moonModeEnabled,showCodexOnHome,reduceMotion,expandedWidth,showOnAllDisplays,musicEnabled,musicClaudeEQEnabled,calendarEnabled,filesEnabled,recordDesktopEnabled,codexEnabled,lidEffectEnabled,completionSoundEnabled,selectedCalendarIDs }
+ enum CodingKeys: String, CodingKey { case cursorEnabled,claudeEnabled,showCursorOnHome,showClaudeOnHome,screenshotsEnabled,screenshotClipboardEnabled,notificationMode,moonModeEnabled,showCodexOnHome,reduceMotion,expandedWidth,showOnAllDisplays,musicEnabled,musicSource,musicClaudeEQEnabled,calendarEnabled,filesEnabled,recordDesktopEnabled,codexEnabled,lidEffectEnabled,completionSoundEnabled,selectedCalendarIDs }
  public init(from decoder: Decoder) throws {
  let c = try decoder.container(keyedBy:CodingKeys.self)
  reduceMotion = try c.decodeIfPresent(Bool.self,forKey:.reduceMotion) ?? false
  expandedWidth = try c.decodeIfPresent(Double.self,forKey:.expandedWidth) ?? 640
  showOnAllDisplays = try c.decodeIfPresent(Bool.self,forKey:.showOnAllDisplays) ?? true
  musicEnabled = try c.decodeIfPresent(Bool.self,forKey:.musicEnabled) ?? false
+ musicSource = try c.decodeIfPresent(MusicSourcePreference.self,forKey:.musicSource) ?? .automatic
  musicClaudeEQEnabled = try c.decodeIfPresent(Bool.self,forKey:.musicClaudeEQEnabled) ?? true
  calendarEnabled = try c.decodeIfPresent(Bool.self,forKey:.calendarEnabled) ?? false
  filesEnabled = try c.decodeIfPresent(Bool.self,forKey:.filesEnabled) ?? true

@@ -44,6 +44,14 @@ import IslandCore
  }
 }
 enum ShelfDropTarget { case shelf, airDrop }
+@MainActor protocol IslandPanelDragHandler: AnyObject {
+ func draggingEntered(_ sender:any NSDraggingInfo) -> NSDragOperation
+ func draggingUpdated(_ sender:any NSDraggingInfo) -> NSDragOperation
+ func draggingExited(_ sender:(any NSDraggingInfo)?)
+ func draggingEnded(_ sender:any NSDraggingInfo)
+ func prepareForDragOperation(_ sender:any NSDraggingInfo) -> Bool
+ func performDragOperation(_ sender:any NSDraggingInfo) -> Bool
+}
 final class IslandPanel: NSPanel {
  var onEscape:(() -> Void)?
  override var canBecomeKey:Bool { true }
@@ -53,7 +61,14 @@ final class IslandPanel: NSPanel {
 }
 // A nonactivating panel must accept the first click while another app is active.
 final class IslandHostingView<Content:View>:NSHostingView<Content> {
+ weak var dragHandler:(any IslandPanelDragHandler)?
  override func acceptsFirstMouse(for event:NSEvent?) -> Bool { true }
+ override func draggingEntered(_ sender:any NSDraggingInfo) -> NSDragOperation { dragHandler?.draggingEntered(sender) ?? [] }
+ override func draggingUpdated(_ sender:any NSDraggingInfo) -> NSDragOperation { dragHandler?.draggingUpdated(sender) ?? [] }
+ override func draggingExited(_ sender:(any NSDraggingInfo)?) { dragHandler?.draggingExited(sender) }
+ override func draggingEnded(_ sender:any NSDraggingInfo) { dragHandler?.draggingEnded(sender) }
+ override func prepareForDragOperation(_ sender:any NSDraggingInfo) -> Bool { dragHandler?.prepareForDragOperation(sender) ?? false }
+ override func performDragOperation(_ sender:any NSDraggingInfo) -> Bool { dragHandler?.performDragOperation(sender) ?? false }
 }
 @MainActor final class IslandMenuAction:NSMenuItem {
  private let handler:() -> Void
@@ -77,7 +92,9 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  return menu
  }
 }
-@MainActor final class NotchWindowController: NSObject, NSWindowDelegate, NSDraggingDestination {
+@MainActor final class NotchWindowController: NSObject, NSWindowDelegate, NSDraggingDestination, IslandPanelDragHandler {
+ private static let restingLevel=NSWindow.Level(rawValue:NSWindow.Level.mainMenu.rawValue-1)
+ private static let fileDragLevel=NSWindow.Level(rawValue:NSWindow.Level.mainMenu.rawValue+1)
  let model=IslandModel()
  let panel:IslandPanel
  let preferences:PreferencesStore
@@ -86,6 +103,9 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  var monitors:[Any]=[]
  private var menuTrackingDepth=0
  private var pendingResize:DispatchWorkItem?
+ private var externalDragPoll:Timer?
+ private var dragPasteboardChange=0
+ private var dragMotionObserved=false
  private var mediaPlaying=false
  private let openSettings:() -> Void
  private let local:LocalStore
@@ -99,11 +119,18 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  panel.registerForDraggedTypes([.fileURL])
  panel.onEscape={ [weak model] in model?.close() }; panel.isOpaque=false; panel.backgroundColor = .clear; panel.hasShadow=false;panel.acceptsMouseMovedEvents=true
  // Keep the system menu bar and Control Center above the island.
- panel.level = NSWindow.Level(rawValue:NSWindow.Level.mainMenu.rawValue-1); panel.hidesOnDeactivate=false; panel.collectionBehavior=[.canJoinAllSpaces,.canJoinAllApplications,.fullScreenAuxiliary,.stationary]; panel.isMovable=false
- panel.contentView=IslandHostingView(rootView:IslandView(model:model,preferences:preferences,local:local,music:music,calendar:calendar,activity:activity,usage:usage,statistics:statistics,airDrop:airDrop,showRecordPlayer:showRecordPlayer,settings:settings))
+ panel.level = Self.restingLevel; panel.hidesOnDeactivate=false; panel.collectionBehavior=[.canJoinAllSpaces,.canJoinAllApplications,.fullScreenAuxiliary,.stationary]; panel.isMovable=false
+ let hosting=IslandHostingView(rootView:IslandView(model:model,preferences:preferences,local:local,music:music,calendar:calendar,activity:activity,usage:usage,statistics:statistics,airDrop:airDrop,showRecordPlayer:showRecordPlayer,settings:settings))
+ hosting.dragHandler=self
+ hosting.registerForDraggedTypes([.fileURL])
+ panel.contentView=hosting
  preferences.$value.map{$0.normalized().expandedWidth}.removeDuplicates().dropFirst().sink { [weak self] _ in DispatchQueue.main.async { self?.refreshGeometry() } }.store(in:&subscriptions)
- if let monitor=NSEvent.addGlobalMonitorForEvents(matching:[.mouseMoved,.leftMouseDragged,.rightMouseDragged,.leftMouseDown,.rightMouseDown]) { [weak self] event in
- guard let self else { return };self.updatePointer(fileDrag:event.type == .leftMouseDragged)
+ if let monitor=NSEvent.addGlobalMonitorForEvents(matching:[.mouseMoved,.leftMouseDragged,.leftMouseUp,.rightMouseDragged,.leftMouseDown,.rightMouseDown]) { [weak self] event in
+ guard let self else { return }
+ if event.type == .leftMouseDown { self.beginExternalDragTracking() }
+ if event.type == .leftMouseDragged { self.dragMotionObserved=true;self.beginExternalDragTracking() }
+ if event.type == .leftMouseUp { self.stopExternalDragTracking() }
+ self.updatePointer(fileDrag:event.type == .leftMouseDragged || self.externalDragPoll != nil)
  // Global monitors only receive events delivered to other apps. Recover a click
  // inside the camera housing if the system menu bar took the click.
  if (event.type == .leftMouseDown && !self.model.state.expanded) || event.type == .rightMouseDown,let layout=self.layout {
@@ -114,7 +141,10 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  }
  } { monitors.append(monitor) }
  if let monitor=NSEvent.addLocalMonitorForEvents(matching:[.mouseMoved,.leftMouseDragged,.rightMouseDragged,.leftMouseDown,.rightMouseDown]) { [weak self] event in
- guard let self else { return event };self.updatePointer(fileDrag:event.type == .leftMouseDragged)
+ guard let self else { return event }
+ if event.type == .leftMouseDown { self.beginExternalDragTracking() }
+ if event.type == .leftMouseDragged { self.dragMotionObserved=true;self.beginExternalDragTracking() }
+ self.updatePointer(fileDrag:event.type == .leftMouseDragged)
  if event.type == .rightMouseDown,event.window === self.panel,!self.model.state.expanded,
  let layout=self.layout {
  let point=self.panel.convertPoint(toScreen:event.locationInWindow)
@@ -170,7 +200,7 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  // Reassert the island once on the next main-loop turn without changing its level.
  DispatchQueue.main.async { [weak panel] in panel?.orderFrontRegardless() }
  }
- func stop() { pendingResize?.cancel();model.finishFileDrop();panel.unregisterDraggedTypes();monitors.forEach { NSEvent.removeMonitor($0) }; monitors=[]; subscriptions=[]; panel.close() }
+ func stop() { pendingResize?.cancel();externalDragPoll?.invalidate();externalDragPoll=nil;model.finishFileDrop();panel.unregisterDraggedTypes();monitors.forEach { NSEvent.removeMonitor($0) }; monitors=[]; subscriptions=[]; panel.close() }
  func refreshGeometry() {
  guard let screen=NSScreen.screens.first(where:{ ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == displayID }) else { return }
  let height=screen.safeAreaInsets.top > 0 ? screen.safeAreaInsets.top : max(24,min(38,screen.frame.maxY-screen.visibleFrame.maxY))
@@ -193,10 +223,56 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  let cx=p.x < frame.midX ? frame.minX+radius : frame.maxX-radius
  if p.x < frame.minX+radius || p.x > frame.maxX-radius { inside=hypot(p.x-cx,p.y-(frame.minY+radius)) <= radius }
  }
- let ignoresMouse = model.fileDropTarget == nil && (model.state.expanded || fileDrag ? !inside : !layout.containsCompactClick(p))
+ // While Finder owns an external drag session, keep this small panel eligible as a
+ // destination even before the pointer crosses its edge. Otherwise AppKit can cache
+ // the menu bar as the destination and never deliver draggingEntered to the notch.
+ let ignoresMouse = model.fileDropTarget == nil && (externalDragPoll != nil ? false : (model.state.expanded || fileDrag ? !inside : !layout.containsCompactClick(p)))
  if panel.ignoresMouseEvents != ignoresMouse { panel.ignoresMouseEvents = ignoresMouse }
  let hoverInside=layout.containsHover(p,expanded:model.state.expanded,sideWidth:model.sideWidth)
  if hoverInside != model.pointerInside { model.updatePointerPresence(hoverInside) }
+ }
+
+ private func beginExternalDragTracking() {
+ guard externalDragPoll == nil else { return }
+ dragPasteboardChange=NSPasteboard(name:.drag).changeCount
+ let timer=Timer(timeInterval:1.0/30,repeats:true) { [weak self] _ in
+  Task { @MainActor [weak self] in
+   guard let self else { return }
+   guard CGEventSource.buttonState(.combinedSessionState,button:.left) else {
+    self.stopExternalDragTracking();return
+   }
+   let pasteboard=NSPasteboard(name:.drag)
+   guard (self.dragMotionObserved || pasteboard.changeCount != self.dragPasteboardChange),
+         pasteboard.availableType(from:[.fileURL]) != nil else { return }
+   if self.panel.level != Self.fileDragLevel {
+    self.panel.level=Self.fileDragLevel;self.panel.ignoresMouseEvents=false
+    self.panel.orderFrontRegardless()
+   }
+   if let layout=self.layout,
+      layout.containsHover(NSEvent.mouseLocation,expanded:self.model.state.expanded,sideWidth:self.model.sideWidth) {
+    let location=self.panel.convertPoint(fromScreen:NSEvent.mouseLocation)
+    if let content=self.panel.contentView {
+     let point=content.convert(location,from:nil)
+     self.model.trackFileDrop(at:CGPoint(x:point.x,y:content.isFlipped ? point.y : content.bounds.maxY-point.y))
+    }
+   }
+   self.updatePointer(fileDrag:true)
+  }
+ }
+ timer.tolerance=1.0/120
+ RunLoop.main.add(timer,forMode:.common)
+ externalDragPoll=timer
+ }
+ private func stopExternalDragTracking() {
+ externalDragPoll?.invalidate();externalDragPoll=nil
+ dragMotionObserved=false
+ if panel.level != Self.restingLevel { panel.level=Self.restingLevel;panel.orderFrontRegardless() }
+ if model.fileDropTarget == nil { updatePointer() }
+ DispatchQueue.main.asyncAfter(deadline:.now()+0.15) { [weak self] in
+  guard let self,self.externalDragPoll == nil,
+        !CGEventSource.buttonState(.combinedSessionState,button:.left) else { return }
+  self.model.finishFileDrop();self.updatePointer()
+ }
  }
 
  func draggingEntered(_ sender:any NSDraggingInfo) -> NSDragOperation { draggingUpdated(sender) }
@@ -229,6 +305,7 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  }
  private func endFileDrop() {
  model.finishFileDrop()
+ stopExternalDragTracking()
  updatePointer()
  }
 }

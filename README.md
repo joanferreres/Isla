@@ -27,22 +27,24 @@ Isla convierte el notch del Mac en un espacio compacto para música, calendario,
 ### Isla dinámica
 
 - Se abre al hacer clic dentro del notch (no al pasar el puntero).
-- Carátula y controles cuando Apple Music está sonando.
+- Carátula y controles cuando Apple Music o Spotify están sonando.
 - Reparte el espacio entre música, calendario y actividad de IA.
 - Se puede fijar abierta y mostrar en una o todas las pantallas.
 
-### Apple Music y tocadiscos
+### Apple Music, Spotify y tocadiscos
 
-- Carátula, título, artista y controles de reproducción.
+- Fuente automática o selección manual de Apple Music / Spotify.
+- Carátula, título, artista, progreso, búsqueda de posición, volumen, aleatorio y controles de reproducción en ambas apps.
 - Tocadiscos a ventana completa: vinilo animado, brazo, ondas y ambientes <kbd>⌘0</kbd>–<kbd>⌘9</kbd>.
 - **Selector de discos** en el borde izquierdo: gira con el trackpad, abanico al pasar el cursor, clic en un disco para cargarlo.
 - Mesa DJ: volumen, Graves / Medios / Agudos, presets de fábrica de Música.
 - Estilo **Claude**: auto-EQ según el tipo de música (Claude o ChatGPT).
-- Playlist, aleatorio, widget nativo y tocadiscos compacto en el escritorio.
+- Widget nativo y tocadiscos compacto en el escritorio para ambas fuentes.
+- Apple Music añade EQ, playlists y selector de discos; Spotify no expone esas tres funciones a otras apps de macOS.
 
 ### EQ con IA y toggles de funciones
 
-- En **Ajustes → Módulos → Funciones**: interruptores para Apple Music, **EQ con IA**, Calendario, bandeja de archivos, tocadiscos en el escritorio y efecto de tapa.
+- En **Ajustes → Módulos → Funciones**: música con fuente automática / Apple Music / Spotify, **EQ con IA**, Calendario, bandeja de archivos, tocadiscos en el escritorio y efecto de tapa.
 - En el tocadiscos, el menú de estilo incluye **Claude** (respeta el interruptor de EQ con IA).
 - El EQ con IA detecta la salida (AirPods, auriculares o altavoces del Mac) y adapta la curva al cambiar de dispositivo.
 - API keys de **Claude** y **ChatGPT** en el llavero (orden: OAuth Claude Code → key Claude → key ChatGPT, o `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
@@ -66,7 +68,7 @@ Concede solo lo que uses. Ruta base: **Ajustes del Sistema → Privacidad y segu
 
 | Permiso | Dónde activarlo | Para qué |
 | --- | --- | --- |
-| **Automatización → Music** | Privacidad y seguridad → Automatización → Isla → **Music** | Carátula, controles, playlists, volumen y presets del EQ vía AppleScript. Sin esto, Música no responde. |
+| **Automatización → Music / Spotify** | Privacidad y seguridad → Automatización → Isla → **Music** o **Spotify** | Leer la canción y controlar reproducción, posición, volumen y aleatorio. Apple Music añade playlists y EQ. |
 | **Accesibilidad** | Privacidad y seguridad → Accesibilidad → activa **Isla** | Mandos Graves/Medios/Agudos, cambio de presets en la ventana EQ de Música, y añadir canciones del catálogo a playlists. |
 | **Calendarios** | Privacidad y seguridad → Calendarios | Eventos del día y recordatorio previo. Isla solo lee. |
 | **Grabación de pantalla** | Privacidad y seguridad → Grabación de pantalla y de sistema | Solo el efecto visual al cerrar la tapa. No guarda vídeo. |
@@ -76,8 +78,8 @@ Concede solo lo que uses. Ruta base: **Ajustes del Sistema → Privacidad y segu
 ### Pasos claros (checklist)
 
 1. Instala **Isla.app** en **Aplicaciones** y ábrela una vez. Si Gatekeeper avisa, usa **Abrir igualmente** ([detalle](docs/INSTALACION.md#primer-aviso-de-macos)).
-2. En Isla → **Ajustes → Módulos**, activa **Apple Music** y reproduce una canción en la app Música.
-3. Si pide control de Música, acepta; si no, ve a **Automatización** y marca **Music** para Isla.
+2. En Isla → **Ajustes → Módulos**, activa **Música**, elige Automática, Apple Music o Spotify y reproduce una canción.
+3. Si pide controlar la app elegida, acepta; si no, ve a **Automatización** y marca **Music** o **Spotify** para Isla.
 4. Abre el tocadiscos y gira un mando del EQ. Si macOS pide Accesibilidad, actívala y vuelve a intentarlo.
 5. (Opcional) **EQ con IA**: activa el interruptor o elige estilo **Claude**. Pega keys en Ajustes → Música o usa `claude auth login` + permiso de llavero.
 6. (Opcional) Calendario, efecto de tapa y capturas: actívalos y concede Calendarios / Grabación de pantalla cuando lo pidan.
@@ -99,7 +101,7 @@ Sustitución manual: sal de Isla → descarga el ZIP → reemplaza la app en Apl
 
 ## Versión actual
 
-**Isla 0.8.80** (compilación 110).
+**Isla 0.8.81** (compilación 111).
 
 Artefactos de release esperados: `Isla.zip` + `SHA256SUMS.txt`. Firma: identidad personal `Isla Personal Code Signing` (Team ID vacío; **sin notarización**). Gatekeeper puede pedir «Abrir igualmente».
 

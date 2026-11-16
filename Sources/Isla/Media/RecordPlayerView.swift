@@ -124,7 +124,7 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                if music.enabled, changerHandOff == nil {
+                if music.enabled,snapshot?.source == .appleMusic,changerHandOff == nil {
                     RecordDiscChanger(
                         palette: palette,
                         reduceMotion: reduceMotion,
@@ -382,7 +382,7 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
 
     private func trackHeading(_ snapshot: MediaSnapshot?) -> some View {
         VStack(spacing: 4) {
-            Label("Apple Music", systemImage: "music.note")
+            Label(snapshot?.source.title ?? "Música", systemImage:snapshot?.source.symbol ?? "music.note")
                 .font(.caption.weight(.medium))
                 .foregroundStyle(accent)
             Text(snapshot?.title ?? "Sin música")
@@ -418,22 +418,20 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
                     }
                 }
             } else {
-                Text(preferences.value.musicEnabled ? "Reproduce una canción en Música." : "Conecta Apple Music para ver la canción y la carátula.")
+                Text(preferences.value.musicEnabled ? "Reproduce una canción en Apple Music o Spotify." : "Conecta Música para ver la canción y la carátula.")
                     .font(.callout).foregroundStyle(ink.opacity(0.72))
                     .multilineTextAlignment(.leading)
                 if preferences.value.musicEnabled {
                     playerButton {
-                        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Music") {
-                            NSWorkspace.shared.openApplication(at: url, configuration: .init()) { _, _ in }
-                        }
+                        music.openPreferredPlayer(preferences.value.musicSource)
                     } label: {
-                        Text("Abrir Música")
+                        Text(preferences.value.musicSource == .spotify ? "Abrir Spotify" : "Abrir Música")
                     }
                 } else {
                     playerButton(tint: accent) {
                         preferences.value.musicEnabled = true
                     } label: {
-                        Text("Conectar Apple Music")
+                        Text("Conectar música")
                     }
                 }
             }
@@ -449,13 +447,15 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
             }
             if music.enabled {
                 shuffleButton
+            }
+            if music.enabled,snapshot?.source == .appleMusic {
                 RecordQueuePlaylistButton {
                     // playPlaylist turns Music shuffle off — mirror that in the toggle.
                     shuffleOn = false
                     changerEpoch += 1
                 }
             }
-            if let snapshot, music.enabled {
+            if let snapshot,music.enabled,snapshot.source == .appleMusic {
                 RecordPlaylistPicker(track: snapshot).id(snapshot.trackID)
             }
             paletteSelector
@@ -511,7 +511,7 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
             Task {
                 defer { shuffleBusy = false }
                 do {
-                    shuffleOn = try await MusicPlaylistService().setShuffle(target)
+                    shuffleOn = try await music.shuffle(target)
                     music.error = nil
                 } catch {
                     music.error = error.localizedDescription
@@ -533,10 +533,10 @@ enum RecordPlayerPalette: String, CaseIterable, Identifiable {
         .accessibilityValue(shuffleOn ? "Activado" : "Desactivado")
         .help(shuffleOn
               ? "Aleatorio activado — pulsa para desactivar. Elegir una playlist lo apaga."
-              : "Aleatorio desactivado — pulsa para activar el shuffle de Música")
+              : "Aleatorio desactivado — pulsa para activar el shuffle")
         .task(id: presentation.isVisible) {
             guard presentation.isVisible, music.enabled else { return }
-            if let enabled = try? await MusicPlaylistService().shuffleEnabled() {
+            if let enabled = try? await music.shuffle() {
                 shuffleOn = enabled
             }
         }

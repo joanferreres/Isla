@@ -69,7 +69,7 @@ import IslandCore
    Text("Activa la bandeja de archivos en Ajustes → Módulos").foregroundStyle(.secondary)
   }.frame(maxWidth:.infinity,maxHeight:.infinity)
  }
- else { VStack(spacing:8) { Image(systemName:section == "Codex" ? "terminal" : "music.note").font(.largeTitle);Text(section == "Codex" ? "Conecta Codex desde Ajustes" : "Conecta Apple Music y Calendario desde Ajustes").foregroundStyle(.secondary) }.frame(maxWidth:.infinity,maxHeight:.infinity) }
+ else { VStack(spacing:8) { Image(systemName:section == "Codex" ? "terminal" : "music.note").font(.largeTitle);Text(section == "Codex" ? "Conecta Codex desde Ajustes" : "Conecta Música y Calendario desde Ajustes").foregroundStyle(.secondary) }.frame(maxWidth:.infinity,maxHeight:.infinity) }
  if let message=local.message { Text(message).font(.caption).foregroundStyle(.orange) }
  }.padding(.horizontal,18).padding(.top,8).padding(.bottom,12).frame(maxHeight:.infinity)
  .transition(.opacity.combined(with:.scale(scale:reduced ? 1 : 0.96,anchor:.top)))

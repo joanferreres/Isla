@@ -90,8 +90,12 @@ enum SettingsPage:String,CaseIterable,Identifiable {
  private var modules:some View {
  Group {
  Section {
- Toggle("Apple Music",isOn:$store.value.musicEnabled)
- Toggle("EQ con IA",isOn:$store.value.musicClaudeEQEnabled).disabled(!store.value.musicEnabled)
+ Toggle("Música",isOn:$store.value.musicEnabled)
+ Picker("Fuente",selection:$store.value.musicSource) {
+  ForEach(MusicSourcePreference.allCases,id:\.self) { source in Text(source.title).tag(source) }
+ }.disabled(!store.value.musicEnabled)
+ Toggle("EQ con IA",isOn:$store.value.musicClaudeEQEnabled)
+  .disabled(!store.value.musicEnabled || store.value.musicSource == .spotify)
  Toggle("Calendario",isOn:$store.value.calendarEnabled)
  Toggle("Bandeja de archivos",isOn:$store.value.filesEnabled)
  Toggle("Tocadiscos en el escritorio",isOn:$store.value.recordDesktopEnabled)
@@ -99,9 +103,9 @@ enum SettingsPage:String,CaseIterable,Identifiable {
  Text("Activa o desactiva las funciones principales. Codex, Cursor y Claude se configuran en la pestaña IA.").font(.caption).foregroundStyle(.secondary)
  } header: { Label("Funciones",systemImage:"switch.2") }
  Section {
- Text("Carátula, canción actual y controles de reproducción.").font(.caption).foregroundStyle(.secondary)
+ Text("Apple Music y Spotify comparten carátula, canción actual, progreso, volumen, controles, tocadiscos y widget. En Automática se usa la app que esté reproduciendo.").font(.caption).foregroundStyle(.secondary)
  if let error=music.error { Text(error).font(.caption).foregroundStyle(.orange) }
- Text("Con EQ con IA, al cambiar de canción o de salida (AirPods ↔ altavoces) se estima el género y se adapta el EQ. También con el estilo «Claude» del tocadiscos.").font(.caption).foregroundStyle(.secondary)
+ Text("El EQ, las playlists y el cambiador de discos dependen de funciones exclusivas de Apple Music. Spotify mantiene volumen, aleatorio, búsqueda de posición y controles de reproducción.").font(.caption).foregroundStyle(.secondary)
  MusicAIEQKeySetup(enabled: store.value.musicClaudeEQEnabled && store.value.musicEnabled)
  } header: { Label("Música e IA EQ",systemImage:"music.note") }
  Section {

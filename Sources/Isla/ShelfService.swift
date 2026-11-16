@@ -1,6 +1,16 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 @MainActor enum ShelfService {
+ static func dragProvider(for url:URL) -> NSItemProvider {
+  let provider=NSItemProvider(object:url as NSURL)
+  provider.suggestedName=url.lastPathComponent
+  provider.registerFileRepresentation(forTypeIdentifier:UTType.item.identifier,fileOptions:.openInPlace,visibility:.all) { completion in
+   completion(url,true,nil)
+   return nil
+  }
+  return provider
+ }
  @discardableResult static func copy(_ url:URL) -> Bool {
  guard FileManager.default.fileExists(atPath:url.path) else { return false }
  let item=NSPasteboardItem()

@@ -18,6 +18,8 @@ import IslandCore
     let reader: any AppleMusicReading
     var timer: Timer?
     var observer: NSObjectProtocol?
+    var spotifyObserver: NSObjectProtocol?
+    var spotifyLifecycleObservers:[NSObjectProtocol]=[]
     private var permissionDenied = false
     private var refreshing = false
     private var generation = 0
@@ -25,10 +27,27 @@ import IslandCore
     private var coverTrail = RecordCoverTrail()
     private var lastCoverTrackID: String?
     private var pendingNavigation: RecordSwipe?
+    private var sourcePreference:MusicSourcePreference = .automatic
     /// Cover known before Music confirms the new track (changer click / swipe).
     private var primedArtwork: (trackID: String, data: Data)?
 
-    init(reader: any AppleMusicReading = AppleMusicBridge()) { self.reader = reader }
+    init(reader: any AppleMusicReading = MusicSourceBridge()) { self.reader = reader }
+
+    var source:MediaSource? { state.snapshot?.source }
+    var sourceTitle:String { source?.title ?? "Música" }
+
+    func setSourcePreference(_ preference:MusicSourcePreference) {
+        sourcePreference=preference
+        permissionDenied=false
+        if enabled {
+            if preference == .spotify { stream.stop() }
+            else if !stream.start() { startFallbackTimer() }
+        }
+        Task {
+            await reader.setSourcePreference(preference)
+            await refresh()
+        }
+    }
 
     func connect() {
         guard !enabled else { return }
@@ -38,16 +57,25 @@ import IslandCore
         observer = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name("com.apple.Music.playerInfo"), object: nil, queue: .main
         ) { [weak self] _ in Task { @MainActor in await self?.refresh() } }
+        spotifyObserver = DistributedNotificationCenter.default().addObserver(
+            forName:NSNotification.Name("com.spotify.client.PlaybackStateChanged"),object:nil,queue:.main
+        ) { [weak self] _ in Task { @MainActor in await self?.refresh() } }
+        let workspace=NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didLaunchApplicationNotification,NSWorkspace.didTerminateApplicationNotification] {
+            spotifyLifecycleObservers.append(workspace.addObserver(forName:name,object:nil,queue:.main) { [weak self] note in
+                guard let app=note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                      app.bundleIdentifier == "com.spotify.client" else { return }
+                Task { @MainActor in await self?.refresh() }
+            })
+        }
         stream.onReply = { [weak self] reply in
             guard let self, self.enabled else { return }
             // MediaRemote is a nudge + cover source. Identity always comes from AppleScript
             // so changer / EQ / playlists keep Music persistent IDs.
             Task { @MainActor in
-                if let bridge = self.reader as? AppleMusicBridge {
-                    await bridge.cacheSystemArtwork(reply)
-                }
+                await self.reader.cacheSystemArtwork(reply)
                 await self.refresh()
-                if let data = reply.artwork, let id = self.state.snapshot?.trackID {
+                if self.state.snapshot?.source == .appleMusic,let data = reply.artwork, let id = self.state.snapshot?.trackID {
                     _ = self.state.acceptArtwork(data, for: id)
                     self.ingestCurrentCover(forceNeighbors: false)
                 }
@@ -56,13 +84,11 @@ import IslandCore
         stream.onStopped = { [weak self] in
             guard let self, self.enabled else { return }
             self.retryStreamAfter = Date().addingTimeInterval(60)
-            self.startFallbackTimer()
+            if self.sourcePreference != .spotify { self.startFallbackTimer() }
             Task { await self.refresh() }
         }
-        if !stream.start() {
-            startFallbackTimer()
-            Task { await refresh() }
-        }
+        if sourcePreference != .spotify,!stream.start() { startFallbackTimer() }
+        Task { await refresh() }
     }
 
     func startFallbackTimer() {
@@ -96,6 +122,10 @@ import IslandCore
         stream.stop()
         if let observer { DistributedNotificationCenter.default().removeObserver(observer) }
         observer = nil
+        if let spotifyObserver { DistributedNotificationCenter.default().removeObserver(spotifyObserver) }
+        spotifyObserver=nil
+        spotifyLifecycleObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
+        spotifyLifecycleObservers=[]
     }
 
     func disconnect() {
@@ -108,6 +138,10 @@ import IslandCore
         timer = nil
         if let observer { DistributedNotificationCenter.default().removeObserver(observer) }
         observer = nil
+        if let spotifyObserver { DistributedNotificationCenter.default().removeObserver(spotifyObserver) }
+        spotifyObserver=nil
+        spotifyLifecycleObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
+        spotifyLifecycleObservers=[]
         state.update(nil)
         neighborArt = MusicNeighbors()
         coverTrail.reset()
@@ -254,9 +288,32 @@ import IslandCore
 
     func mixerVolume(_ value: Int? = nil) async throws -> Int {
         guard enabled, !permissionDenied else {
-            throw MusicFailure(message: "Conecta Apple Music para controlar su volumen.")
+            throw MusicFailure(message: "Conecta una app de música para controlar su volumen.")
         }
         return try await reader.volume(value)
+    }
+
+    func shuffle(_ value:Bool?=nil) async throws -> Bool {
+        guard enabled,!permissionDenied else { throw MusicFailure(message:"Conecta una app de música para usar el modo aleatorio.") }
+        return try await reader.shuffle(value)
+    }
+
+    func openPreferredPlayer(_ preference:MusicSourcePreference) {
+        let bundle:String
+        switch preference {
+        case .spotify:bundle="com.spotify.client"
+        case .appleMusic:bundle="com.apple.Music"
+        case .automatic:
+            bundle = NSRunningApplication.runningApplications(withBundleIdentifier:"com.spotify.client").isEmpty
+                ? "com.apple.Music" : "com.spotify.client"
+        }
+        guard let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:bundle) else {
+            error = bundle == "com.spotify.client" ? "Spotify no está instalado en este Mac." : "Apple Music no está disponible."
+            return
+        }
+        NSWorkspace.shared.openApplication(at:url,configuration:.init()) { [weak self] _,failure in
+            Task { @MainActor in if let failure { self?.error=failure.localizedDescription } }
+        }
     }
 
     /// Call on changer/swipe click with the cover already on the fan so the main disc

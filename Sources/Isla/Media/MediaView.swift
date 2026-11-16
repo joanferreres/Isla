@@ -18,7 +18,7 @@ import IslandCore
  HStack(alignment:.center,spacing:10) {
  ArtworkView(music:music,size:42)
  VStack(alignment:.leading,spacing:4) {
- Text(music.state.snapshot?.title ?? (music.enabled ? "Apple Music en pausa" : "Apple Music")).font(.system(size:12,weight:.semibold)).lineLimit(1)
+ Text(music.state.snapshot?.title ?? (music.enabled ? "Música en pausa" : "Música")).font(.system(size:12,weight:.semibold)).lineLimit(1)
  Text(music.state.snapshot?.artist ?? (music.enabled ? "Elige una canción" : "Conectar en Ajustes")).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
  }.frame(maxWidth:.infinity,alignment:.leading)
  }
@@ -31,7 +31,7 @@ import IslandCore
  .frame(maxWidth:.infinity)
  Button { music.send(.next) } label: { Image(systemName:"forward.fill") }.accessibilityLabel("Siguiente")
  .frame(maxWidth:.infinity)
- if music.enabled {
+ if music.enabled,snapshot.source == .appleMusic {
  RecordPlaylistPicker(track:snapshot,island:island).id(snapshot.trackID)
  .frame(maxWidth:.infinity)
  }

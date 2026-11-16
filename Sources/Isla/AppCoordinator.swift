@@ -46,6 +46,7 @@ import IslandCore
  guard let self else { return };let old=self.appliedPreferences;self.appliedPreferences=value
  AIUsageAccounts.shared.apply(value)
  self.screenshots.copyToClipboard=value.screenshotClipboardEnabled
+ if old?.musicSource != value.musicSource { self.music.setSourcePreference(value.musicSource) }
  if old?.screenshotsEnabled != value.screenshotsEnabled {
  if value.screenshotsEnabled { do { try self.screenshots.start(copyToClipboard:value.screenshotClipboardEnabled) } catch { self.screenshots.error="No se pudo acceder a Escritorio/capturas." } }
  else { self.screenshots.stop() }
