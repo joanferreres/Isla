@@ -43,6 +43,7 @@ actor CalendarReader {
  func events(on day:Date) -> [CalendarEvent] { CalendarDay.events(on:day,from:surroundingEvents,calendar:.current) }
  @Published var calendars:[CalendarChoice]=[]
  @Published var selectedDate=Date()
+ private var lastObservedDay=Calendar.current.startOfDay(for:Date())
  @Published var error:String?
  @Published var enabled=false
  @Published var reminder:CalendarEvent?
@@ -58,6 +59,7 @@ actor CalendarReader {
  guard !enabled else { refresh();return }; enabled=true;generation += 1
  observers.append(NotificationCenter.default.addObserver(forName:.EKEventStoreChanged,object:nil,queue:.main) { [weak self] _ in Task { @MainActor in self?.refresh() } })
  observers.append(NotificationCenter.default.addObserver(forName:NSApplication.didBecomeActiveNotification,object:nil,queue:.main) { [weak self] _ in Task { @MainActor in self?.refresh() } })
+ observers.append(NotificationCenter.default.addObserver(forName:.NSCalendarDayChanged,object:nil,queue:.main) { [weak self] _ in Task { @MainActor in self?.refresh() } })
  observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.didWakeNotification,object:nil,queue:.main) { [weak self] _ in Task { @MainActor in self?.refresh() } })
  let g=generation
  Task { do { let granted=try await reader.request(); guard enabled,g == generation else { return };if granted { refresh() } else { error="Permite el acceso al Calendario en Privacidad." } } catch { self.error="No se pudo acceder al Calendario." } }
@@ -65,7 +67,13 @@ actor CalendarReader {
  func disconnect() { enabled=false;reminderTask?.cancel();reminderTask=nil;reminder=nil;reminderMinutes=0;upcomingEvents=[];generation += 1; events=[];surroundingEvents=[];calendars=[];for o in observers { NotificationCenter.default.removeObserver(o);NSWorkspace.shared.notificationCenter.removeObserver(o) };observers=[] }
  func select(day:Date) { selectedDate=day;refresh() }
  func refresh() {
- guard enabled else { return };let date=selectedDate;let ids=preferences.value.selectedCalendarIDs;generation += 1;let g=generation
+ guard enabled else { return }
+ let today=Calendar.current.startOfDay(for:Date())
+ if today != lastObservedDay {
+ lastObservedDay=today
+ selectedDate=today
+ }
+ let date=selectedDate;let ids=preferences.value.selectedCalendarIDs;generation += 1;let g=generation
  Task { let result=await reader.read(day:date,ids:ids);guard enabled,g == generation else { return };if let result { calendars=result.0;surroundingEvents=result.1;events=CalendarDay.events(on:date,from:result.1,calendar:.current);upcomingEvents=result.2;updateReminder();error=nil } else { events=[];surroundingEvents=[];upcomingEvents=[];updateReminder();error="Calendario sin acceso. Revisa el permiso en Privacidad." } }
  }
  func previewReminder() {

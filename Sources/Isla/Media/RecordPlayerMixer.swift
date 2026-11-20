@@ -32,26 +32,25 @@ struct RecordPlayerMixer: View {
     /// Style entry in the EQ menu — enables Claude auto-EQ (not a Music factory preset).
     private static let claudeStyleName = "Claude"
     private var supportsEQ:Bool { music.state.snapshot?.source != .spotify }
+    @State private var spotifyEqualizer = SpotifyEqualizer()
+    @State private var spotifyEQError: String?
+    @State private var spotifyEQBusy = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if supportsEQ {
             HStack(spacing: 8) {
-                presetMenu
+                if supportsEQ { presetMenu }
                 Spacer(minLength: 0)
                 resetButton
             }
-            }
             HStack(spacing: 15) {
-                if supportsEQ {
                 VStack(spacing: 7) {
                     ForEach(MixerBand.allCases, id: \.self) { band in
                         EQKnob(title: band.title, gain: gains[band], accent: palette.accent) { value in
                             adjust(value, band: band)
                         }
-                        .disabled(!active)
+                        .disabled(!active || spotifyEQBusy)
                     }
-                }
                 }
                 volumeFader
             }
@@ -64,6 +63,9 @@ struct RecordPlayerMixer: View {
             }
             if let volumeError {
                 Text(volumeError).font(.caption2).foregroundStyle(.secondary)
+            }
+            if !supportsEQ, let spotifyEQError {
+                Text(spotifyEQError).font(.caption2).foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 10)
@@ -82,7 +84,7 @@ struct RecordPlayerMixer: View {
             audioOutput.setActive(active)
             guard active else { return }
             await readVolume()
-            guard supportsEQ else { return }
+            guard supportsEQ else { gains = [:]; return }
             await loadPresets()
             if let current = try? await equalizer.read(), !Task.isCancelled {
                 gains = current
@@ -178,6 +180,10 @@ struct RecordPlayerMixer: View {
 
     @ViewBuilder private var resetButton: some View {
         let button = Button {
+            if !supportsEQ {
+                adjustSpotify(0, band: nil)
+                return
+            }
             preemptClaudeForUserEdit()
             let neutral = Dictionary(uniqueKeysWithValues: MixerBand.allCases.map { ($0, 0.0) })
             applyEQ(preview: neutral, userInitiated: true) {
@@ -194,8 +200,8 @@ struct RecordPlayerMixer: View {
         .controlSize(.small)
         .buttonBorderShape(.capsule)
         .accessibilityLabel("Restablecer ecualizador")
-        .help("Poner graves, medios y agudos a cero y desactivar el EQ de Música")
-        .disabled(!active)
+        .help("Poner graves, medios y agudos a cero")
+        .disabled(!active || spotifyEQBusy)
         if #available(macOS 26.0, *), !reduceTransparency {
             button.buttonStyle(.glass)
         } else {
@@ -281,6 +287,10 @@ struct RecordPlayerMixer: View {
     }
 
     private func adjust(_ target: Double, band: MixerBand) {
+        if !supportsEQ {
+            adjustSpotify(target, band: band)
+            return
+        }
         // Manual knob preempts Claude immediately — never wait on an in-flight auto-EQ latch.
         preemptClaudeForUserEdit()
         var preview = gains
@@ -291,6 +301,23 @@ struct RecordPlayerMixer: View {
             let result = try await equalizer.setAll(preview)
             selectedPreset = try? await equalizer.currentPresetName() ?? "Manual"
             return result
+        }
+    }
+
+    private func adjustSpotify(_ target: Double, band: MixerBand?) {
+        guard !spotifyEQBusy, active else { return }
+        spotifyEQBusy = true
+        spotifyEQError = nil
+        Task {
+            defer { spotifyEQBusy = false }
+            do {
+                let result = try await spotifyEqualizer.apply(target, band: band)
+                if !supportsEQ { gains = result }
+            } catch MusicEqualizer.Failure.access {
+                spotifyEQError = "Permite Isla en Privacidad y seguridad → Accesibilidad para ajustar Spotify."
+            } catch {
+                spotifyEQError = error.localizedDescription
+            }
         }
     }
 

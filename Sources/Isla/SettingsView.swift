@@ -105,7 +105,7 @@ enum SettingsPage:String,CaseIterable,Identifiable {
  Section {
  Text("Apple Music y Spotify comparten carátula, canción actual, progreso, volumen, controles, tocadiscos y widget. En Automática se usa la app que esté reproduciendo.").font(.caption).foregroundStyle(.secondary)
  if let error=music.error { Text(error).font(.caption).foregroundStyle(.orange) }
- Text("El EQ, las playlists y el cambiador de discos dependen de funciones exclusivas de Apple Music. Spotify mantiene volumen, aleatorio, búsqueda de posición y controles de reproducción.").font(.caption).foregroundStyle(.secondary)
+ Text("Los mandos del tocadiscos ajustan el ecualizador de la app activa. Para Spotify, autoriza Isla en Accesibilidad. El EQ con IA, las playlists y el cambiador de discos son exclusivos de Apple Music.").font(.caption).foregroundStyle(.secondary)
  MusicAIEQKeySetup(enabled: store.value.musicClaudeEQEnabled && store.value.musicEnabled)
  } header: { Label("Música e IA EQ",systemImage:"music.note") }
  Section {
