@@ -42,7 +42,7 @@ struct RecordQueuePlaylistButton: View {
                         }
                         .frame(height: min(250, CGFloat(playlists.count) * 34))
                     } else if playlists?.isEmpty == true {
-                        Text("No hay playlists editables en Música.")
+                        Text("No hay playlists editables.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     } else if error == nil {

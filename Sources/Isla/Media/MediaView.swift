@@ -31,7 +31,7 @@ import IslandCore
  .frame(maxWidth:.infinity)
  Button { music.send(.next) } label: { Image(systemName:"forward.fill") }.accessibilityLabel("Siguiente")
  .frame(maxWidth:.infinity)
- if music.enabled,snapshot.source == .appleMusic {
+ if music.enabled {
  RecordPlaylistPicker(track:snapshot,island:island).id(snapshot.trackID)
  .frame(maxWidth:.infinity)
  }

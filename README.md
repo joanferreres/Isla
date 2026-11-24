@@ -40,7 +40,7 @@ Isla convierte el notch del Mac en un espacio compacto para música, calendario,
 - Mesa DJ: volumen, Graves / Medios / Agudos, presets de fábrica de Música.
 - Estilo **Claude**: auto-EQ según el tipo de música (Claude o ChatGPT).
 - Widget nativo y tocadiscos compacto en el escritorio para ambas fuentes.
-- Apple Music añade EQ, playlists y selector de discos; Spotify no expone esas tres funciones a otras apps de macOS.
+- Spotify tiene los mandos Graves/Medios/Agudos y el EQ con IA (vía Accesibilidad). Sus playlists, la cola, «añadir a playlist» y el selector de discos usan la API web de Spotify: ver [Conectar Spotify](#conectar-spotify-playlists-y-selector-de-discos).
 
 ### EQ con IA y toggles de funciones
 
@@ -112,6 +112,17 @@ Más detalle en [docs/INSTALACION.md](docs/INSTALACION.md#primer-aviso-de-macos)
 | **EQ con IA** | Pega una API key de Claude (`sk-ant-…`) o de ChatGPT en Ajustes → Música, o define `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` en tu shell. No sirve la sesión de un plan de Claude. |
 | **Archivos / AirDrop** | Arrastra archivos desde Finder al notch. No requiere permisos. |
 | **Efecto de tapa** | Actívalo y concede **Grabación de pantalla** (solo para el efecto; no guarda vídeo). |
+
+### Conectar Spotify (playlists y selector de discos)
+
+Los mandos, el EQ y el EQ con IA de Spotify funcionan sin más. Para **playlists, añadir a playlist, cola y selector de discos** Spotify exige una app propia (gratis, 2 minutos, requiere **Spotify Premium**). No es un fallo de Isla: en modo desarrollo Spotify solo admite unos pocos usuarios por app, así que cada persona crea la suya.
+
+1. Abre [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard), inicia sesión y pulsa **Create app**.
+2. En **Redirect URI** pega `http://127.0.0.1:43821/callback`, marca **Web API** y guarda.
+3. Copia el **Client ID** de tu app.
+4. En Isla: **Ajustes → Módulos → Música**, bloque *Spotify*: pega el Client ID y pulsa **Conectar**. Se abre el navegador; acepta el acceso.
+
+Solo se pueden usar playlists tuyas o colaborativas (límite de Spotify). Isla guarda el acceso en el llavero y lo renueva sola; **Desconectar Spotify** lo borra.
 
 ### 5. Conectar el consumo de IA (Codex, Cursor, Claude)
 

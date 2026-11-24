@@ -167,6 +167,7 @@ import IslandCore
         do {
             let snapshot = try await reader.read()
             guard enabled, current == generation else { return }
+            PlaylistRoute.isSpotify = snapshot?.source == .spotify
             permissionDenied = false
             let changed = state.snapshot?.trackID != snapshot?.trackID
             let primed: Data? = {

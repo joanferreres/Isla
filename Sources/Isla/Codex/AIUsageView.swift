@@ -111,13 +111,13 @@ import IslandCore
  if !service.enabled { Text("Conecta \(service.provider.title) en Ajustes → IA.").foregroundStyle(.secondary) }
  if service.loading { ProgressView().controlSize(.small) }
  if let snapshot=service.snapshot {
- ForEach(snapshot.windows) { window in
+ LazyVGrid(columns:[GridItem(.flexible(),spacing:16,alignment:.top),GridItem(.flexible(),alignment:.top)],alignment:.leading,spacing:10) { ForEach(snapshot.windows) { window in
  VStack(alignment:.leading,spacing:4) {
- HStack { Text(service.provider.label(window.id));Spacer();Text("\(Int(window.remainingPercent)) % restante").monospacedDigit() }
+ HStack { Text(service.provider.label(window.id)).lineLimit(1);Spacer();Text("\(Int(window.remainingPercent)) % restante").monospacedDigit() }
  ProgressView(value:max(0,min(1,window.usedFraction))).tint(service.isStale() ? .gray : .mint)
  if let reset=window.resetsAt { Text("Reinicio: \(reset.formatted(date:.abbreviated,time:.shortened))").font(.caption2).foregroundStyle(.secondary) }
  }
- }
+ } }
  Text("\(service.isStale() ? "Dato antiguo · " : "")Actualizado \(snapshot.fetchedAt.formatted(date:.omitted,time:.shortened))").font(.caption2).foregroundStyle(.secondary)
  }
  if let error=service.error { Text(error).font(.caption).foregroundStyle(.orange) }

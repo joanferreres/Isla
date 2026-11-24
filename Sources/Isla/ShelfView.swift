@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import IslandCore
 import QuickLookThumbnailing
 @MainActor struct ShelfView:View {
  @ObservedObject var store:LocalStore
@@ -18,10 +19,7 @@ import QuickLookThumbnailing
  ScrollView(.horizontal,showsIndicators:false) {
  HStack(alignment:.top,spacing:12) { ForEach(store.document.files) { item in
  let exists=FileManager.default.fileExists(atPath:item.url.path)
- VStack(spacing:5) {
- ShelfThumbnail(url:item.url).frame(width:44,height:44)
- Text(item.url.lastPathComponent).font(.system(size:10,weight:.medium)).lineLimit(2).multilineTextAlignment(.center).frame(width:72)
- }.frame(width:76,height:78).opacity(exists ? 1 : 0.4)
+ ShelfFileCell(item:item,exists:exists,remove:{ store.removeFile(item.id) })
  .onTapGesture(count:2) { if exists { NSWorkspace.shared.open(item.url) } }
  .onDrag { ShelfService.dragProvider(for:item.url) }
  .contextMenu {
@@ -68,6 +66,28 @@ import QuickLookThumbnailing
  .onDisappear { model.airDropFrame = .null }
  .accessibilityLabel("AirDrop: arrastra archivos para elegir un destinatario")
  }.overlay(alignment:.bottom) { if let error=airDrop.error { Text(error).font(.caption2).foregroundStyle(.orange).padding(5).background(.black.opacity(0.9),in:Capsule()) } }
+ }
+}
+@MainActor private struct ShelfFileCell:View {
+ let item:ShelfItem
+ let exists:Bool
+ let remove:() -> Void
+ @State private var hovering=false
+ var body:some View {
+ VStack(spacing:5) {
+ ShelfThumbnail(url:item.url).frame(width:44,height:44)
+ Text(item.url.lastPathComponent).font(.system(size:10,weight:.medium)).lineLimit(2).multilineTextAlignment(.center).frame(width:72)
+ }.frame(width:76,height:78).opacity(exists ? 1 : 0.4)
+ .overlay(alignment:.topLeading) {
+ if hovering {
+ Button(action:remove) { Image(systemName:"xmark.circle.fill").font(.system(size:16)).symbolRenderingMode(.palette).foregroundStyle(.white,Color(white:0.25)) }
+ .buttonStyle(.plain).help("Quitar de la bandeja").accessibilityLabel("Quitar \(item.url.lastPathComponent) de la bandeja")
+ .transition(.opacity)
+ }
+ }
+ .contentShape(Rectangle())
+ .onHover { hovering=$0 }
+ .animation(.easeOut(duration:0.12),value:hovering)
  }
 }
 @MainActor private struct ShelfThumbnail:View {

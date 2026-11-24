@@ -78,7 +78,54 @@ actor AICredentialReader {
         ] as CFDictionary)
     }
 
+    /// Isla's own keychain copy of another app's "Safe Storage" password. Isla created the item, so it can read it
+    /// silently forever; the original item only grants access for the single click the user gave ("Permitir").
+    private func cachedPassword(service: String, account: String) -> String? {
+        let (status, result) = silentKeychain([
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: "local.personal.isla.cache.\(service)",
+            kSecAttrAccount: account,
+            kSecReturnData: true,
+            kSecMatchLimit: kSecMatchLimitOne,
+        ])
+        guard status == errSecSuccess, let data = result as? Data,
+              let text = String(data: data, encoding: .utf8), !text.isEmpty else { return nil }
+        return text
+    }
+
+    private func cachePassword(_ password: String, service: String, account: String) {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: "local.personal.isla.cache.\(service)",
+            kSecAttrAccount: account,
+        ]
+        var allowed: DarwinBoolean = true
+        SecKeychainGetUserInteractionAllowed(&allowed)
+        SecKeychainSetUserInteractionAllowed(false)
+        defer { SecKeychainSetUserInteractionAllowed(allowed.boolValue) }
+        let data = Data(password.utf8)
+        if SecItemUpdate(query as CFDictionary, [kSecValueData: data] as CFDictionary) == errSecItemNotFound {
+            var add = query
+            add[kSecValueData] = data
+            add[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlock
+            SecItemAdd(add as CFDictionary, nil)
+        }
+    }
+
+    private func forgetCachedPassword(service: String, account: String) {
+        var allowed: DarwinBoolean = true
+        SecKeychainGetUserInteractionAllowed(&allowed)
+        SecKeychainSetUserInteractionAllowed(false)
+        defer { SecKeychainSetUserInteractionAllowed(allowed.boolValue) }
+        SecItemDelete([
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: "local.personal.isla.cache.\(service)",
+            kSecAttrAccount: account,
+        ] as CFDictionary)
+    }
+
     private func keychainPassword(service: String, account: String, interactive: Bool) throws -> String {
+        if let cached = cachedPassword(service: service, account: account) { return cached }
         let base: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
@@ -91,12 +138,13 @@ actor AICredentialReader {
            let data = silentResult as? Data,
            let password = String(data: data, encoding: .utf8),
            !password.isEmpty {
+            cachePassword(password, service: service, account: account)
             return password
         }
         guard interactive else {
             throw MusicFailure(message: service.hasPrefix("Cursor")
-                ? "Permite a Isla usar «Cursor Safe Storage» del llavero (Ajustes → IA → Actualizar Cursor)."
-                : "Permite el acceso al llavero para leer la sesión.")
+                ? "Permite a Isla usar «Cursor Safe Storage» del llavero (Ajustes → IA → Actualizar Cursor) y pulsa «Permitir»; solo se pide una vez."
+                : "Permite a Isla usar «\(service)» del llavero (Ajustes → IA → Actualizar) y pulsa «Permitir»; solo se pide una vez.")
         }
         var wasAllowed: DarwinBoolean = true
         SecKeychainGetUserInteractionAllowed(&wasAllowed)
@@ -113,6 +161,7 @@ actor AICredentialReader {
                 ? "Se canceló el acceso al llavero."
                 : "No se pudo leer «\(service)» del llavero.")
         }
+        cachePassword(password, service: service, account: account)
         return password
     }
 
@@ -120,7 +169,12 @@ actor AICredentialReader {
         guard sealed.hasPrefix(ElectronSafeStorage.cursorPrefix) else { return sealed }
         if sealed == cachedCursorSealed, let cachedCursorToken { return cachedCursorToken }
         let secret = try password ?? keychainPassword(service: "Cursor Safe Storage", account: "Cursor Key", interactive: interactive)
-        let token = try ElectronSafeStorage.unwrap(sealed, password: secret)
+        let token: String
+        do { token = try ElectronSafeStorage.unwrap(sealed, password: secret) }
+        catch {
+            if password == nil { forgetCachedPassword(service: "Cursor Safe Storage", account: "Cursor Key") }
+            throw error
+        }
         cachedCursorSealed = sealed
         cachedCursorToken = token
         return token
@@ -221,9 +275,15 @@ actor AICredentialReader {
         // Empty/expired/rejected Claude Code-credentials (common when Claude Code uses ANTHROPIC_API_KEY only).
         if seen != nil { forgetClaude() }
         // Claude Desktop session cookie → organization usage (no Claude Code OAuth needed).
-        if let desktop = try? claudeDesktopUsageRequest(interactive: interactive, home: home) { return desktop }
+        var desktopFailure: Error?
+        do { return try claudeDesktopUsageRequest(interactive: interactive, home: home) } catch { desktopFailure = error }
         if expiredOAuth {
             throw MusicFailure(message: "La sesión OAuth de Claude Code ha caducado o ya no es válida. Abre Claude Code o ejecuta «claude auth login», o inicia sesión en la app Claude.")
+        }
+        // The app Claude is installed and signed in but unreadable (keychain permission, decryption): say that first.
+        if let failure = desktopFailure as? MusicFailure,
+           failure.message.contains("llavero") || failure.message.contains("Safe Storage") {
+            throw failure
         }
         if anthropicAPIKey() != nil {
             throw MusicFailure(message: "Claude Code está con API key (sin OAuth) y no hay sesión usable de la app Claude. El EQ funciona; para límites en Isla: «claude auth login» o inicia sesión en Claude Desktop.")
@@ -338,7 +398,12 @@ actor AICredentialReader {
             throw MusicFailure(message: "Inicia sesión en la app Claude.")
         }
         let password = try keychainPassword(service: "Claude Safe Storage", account: "Claude Key", interactive: interactive)
-        let session = try ElectronSafeStorage.chromeCookieValue(sessionBlob, password: password)
+        let session: String
+        do { session = try ElectronSafeStorage.chromeCookieValue(sessionBlob, password: password) }
+        catch {
+            forgetCachedPassword(service: "Claude Safe Storage", account: "Claude Key")
+            throw error
+        }
         let organization: String
         if let orgBlob = encrypted("lastActiveOrg"),
            let org = try? ElectronSafeStorage.chromeCookieValue(orgBlob, password: password),

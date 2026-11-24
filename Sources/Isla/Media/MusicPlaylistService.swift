@@ -8,12 +8,14 @@ actor MusicPlaylistService {
     private let logger = Logger(subsystem: "local.personal.isla", category: "Playlists")
 
     func playlists() async throws -> [MusicPlaylist] {
-        try await (bridge.query("playlists").playlists ?? []).sorted {
+        if PlaylistRoute.isSpotify { return try await SpotifyPlaylistService.shared.playlists() }
+        return try await (bridge.query("playlists").playlists ?? []).sorted {
             $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
     }
 
     func currentCatalog() async throws -> MusicPlaylistCatalog {
+        if PlaylistRoute.isSpotify { return try await SpotifyPlaylistService.shared.currentCatalog() }
         guard let catalog = try await bridge.query("playlistTracks").playlistCatalog else {
             throw MusicFailure(message: "Música no expone una playlist con canciones ahora mismo.")
         }
@@ -23,6 +25,7 @@ actor MusicPlaylistService {
     /// Active playlist when it has songs; otherwise upcoming / suggested next tracks.
     /// Does not fall through to a random library sample while a playlist has tracks.
     func changerCatalog() async throws -> MusicPlaylistCatalog {
+        if PlaylistRoute.isSpotify { return try await SpotifyPlaylistService.shared.changerCatalog() }
         if let catalog = try? await bridge.query("playlistTracks").playlistCatalog,
            !catalog.tracks.isEmpty {
             return catalog
@@ -35,20 +38,24 @@ actor MusicPlaylistService {
     }
 
     func playPlaylist(_ playlist: MusicPlaylist) async throws {
+        if PlaylistRoute.isSpotify { return try await SpotifyPlaylistService.shared.playPlaylist(playlist) }
         _ = try await bridge.query("playPlaylist", argument: playlist.id)
     }
 
     func shuffleEnabled() async throws -> Bool {
-        try await bridge.query("shuffleState").shuffleEnabled ?? false
+        if PlaylistRoute.isSpotify { return await MainActor.run { SpotifyHelper.query("shuffle").shuffle ?? false } }
+        return try await bridge.query("shuffleState").shuffleEnabled ?? false
     }
 
     /// Toggle Music’s shuffle mode only — does not restart or randomize the current queue.
     @discardableResult
     func setShuffle(_ enabled: Bool) async throws -> Bool {
-        try await bridge.query("setShuffle", argument: enabled ? "1" : "0").shuffleEnabled ?? enabled
+        if PlaylistRoute.isSpotify { return await MainActor.run { SpotifyHelper.query("shuffle", argument: enabled ? "1" : "0").shuffle ?? enabled } }
+        return try await bridge.query("setShuffle", argument: enabled ? "1" : "0").shuffleEnabled ?? enabled
     }
 
     func play(trackID: String) async throws {
+        if PlaylistRoute.isSpotify { return try await SpotifyPlaylistService.shared.play(trackID: trackID) }
         let reply = try await bridge.query("playTrack", argument: trackID)
         guard reply.artworkTrackID == trackID else {
             throw MusicFailure(message: "Esa canción ya no está en la playlist de Música.")
@@ -56,11 +63,13 @@ actor MusicPlaylistService {
     }
 
     func artwork(trackID: String) async throws -> Data? {
-        try await bridge.query("trackArtwork", argument: trackID).artwork(for: trackID)
+        if PlaylistRoute.isSpotify { return try await SpotifyPlaylistService.shared.artwork(trackID: trackID) }
+        return try await bridge.query("trackArtwork", argument: trackID).artwork(for: trackID)
     }
 
     /// Returns false when the song was already in the selected playlist.
     func add(_ track: MediaSnapshot, to playlist: MusicPlaylist, unambiguousName: Bool) async throws -> Bool {
+        if track.source == .spotify { return try await SpotifyPlaylistService.shared.add(track, to: playlist) }
         let request = MusicPlaylistRequest(playlistID: playlist.id, track: track)
         guard let argument = request.argument else { throw MusicFailure(message: "No se pudo identificar la canción.") }
         if try await bridge.query("playlistContainsTrack", argument: argument).playlistContainsTrack == true {

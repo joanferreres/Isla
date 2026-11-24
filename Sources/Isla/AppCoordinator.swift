@@ -32,7 +32,7 @@ import IslandCore
  UserDefaults.standard.set(true,forKey:"recordDesktopPreferenceMigrated")
  }
  music.$state.sink { [weak self] state in self?.recordWidget.update(state) }.store(in:&integrationSubscriptions)
- activity.onCompletion = { [weak self] event in self?.statistics.record(event) }
+ activity.onCompletion = { [weak self] event in if (event.source ?? .codex) == .codex { self?.statistics.record(event) } }
  usage.onSnapshot = { [weak self] snapshot in self?.statistics.record(snapshot) }
  displays = DisplayCoordinator(preferences: preferences, local: local, music: music, calendar: calendar, activity: activity, usage: usage, statistics: statistics, showRecordPlayer: { [weak self] in self?.openRecordPlayer() }, settings: { [weak self] in self?.showSettings() })
  displays?.reconcile()
@@ -58,7 +58,9 @@ import IslandCore
  self.activity.completionHighlightEnabled = value.aiVisualEnabled
  self.activity.completionNoticeEnabled = value.aiVisualEnabled
  if !value.aiVisualEnabled { self.activity.latest=nil }
- if old?.codexEnabled != value.codexEnabled { if value.codexEnabled { self.activity.connect();self.usage.connect() } else { self.activity.disconnect();self.usage.disconnect() } }
+ self.activity.watchesCodex=value.codexEnabled;self.activity.watchesClaude=value.claudeEnabled
+ if old?.claudeEnabled != value.claudeEnabled || old?.codexEnabled != value.codexEnabled { if value.codexEnabled || value.claudeEnabled { self.activity.connect() } else { self.activity.disconnect() } }
+ if old?.codexEnabled != value.codexEnabled { if value.codexEnabled { self.usage.connect() } else { self.usage.disconnect() } }
  if old?.lidEffectEnabled != value.lidEffectEnabled { if value.lidEffectEnabled { Task { await self.lid.enable(requestPermission:old != nil) } } else { self.lid.disable() } }
  if old?.recordDesktopEnabled != value.recordDesktopEnabled {
   self.recordPlayer.applyDesktopEnabled(value.recordDesktopEnabled)
@@ -73,7 +75,7 @@ import IslandCore
  guard let self else { return };let value=self.preferences.value
  self.updates.start()
  AIUsageAccounts.shared.resume(value)
- if value.musicEnabled { self.music.connect() };if value.codexEnabled { self.activity.connect();self.usage.resume();self.usage.connect() };if value.lidEffectEnabled { Task { await self.lid.enable() } }
+ if value.musicEnabled { self.music.connect() };if value.codexEnabled || value.claudeEnabled { self.activity.connect() };if value.codexEnabled { self.usage.resume();self.usage.connect() };if value.lidEffectEnabled { Task { await self.lid.enable() } }
  }.store(in:&integrationSubscriptions)
  installMainMenu()
  status = NSStatusBar.system.statusItem(withLength: 28)

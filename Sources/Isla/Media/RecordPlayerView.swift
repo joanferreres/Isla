@@ -91,7 +91,7 @@ import IslandCore
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                if music.enabled,snapshot?.source == .appleMusic,changerHandOff == nil {
+                if music.enabled,snapshot != nil,changerHandOff == nil {
                     RecordDiscChanger(
                         palette: palette,
                         reduceMotion: reduceMotion,
@@ -416,14 +416,14 @@ import IslandCore
             if music.enabled {
                 shuffleButton
             }
-            if music.enabled,snapshot?.source == .appleMusic {
+            if music.enabled,snapshot != nil {
                 RecordQueuePlaylistButton {
                     // playPlaylist turns Music shuffle off — mirror that in the toggle.
                     shuffleOn = false
                     changerEpoch += 1
                 }
             }
-            if let snapshot,music.enabled,snapshot.source == .appleMusic {
+            if let snapshot,music.enabled {
                 RecordPlaylistPicker(track: snapshot).id(snapshot.trackID)
             }
             paletteSelector

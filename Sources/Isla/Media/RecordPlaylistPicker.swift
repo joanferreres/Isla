@@ -17,7 +17,7 @@ struct RecordPlaylistPicker: View {
     var body: some View {
         styledButton
             .accessibilityLabel("Añadir a playlist")
-            .help(error ?? status ?? "Añadir la canción a una playlist de Música")
+            .help(error ?? status ?? "Añadir la canción a una playlist de tu app de música")
             .onChange(of: isOpen) { _, open in holdIsland(open) }
             .onDisappear { holdIsland(false) }
             .popover(isPresented: $isOpen, arrowEdge: .top) {
@@ -51,7 +51,7 @@ struct RecordPlaylistPicker: View {
                         }
                         .frame(height: min(250, CGFloat(playlists.count) * 36))
                     } else if playlists?.isEmpty == true {
-                        Text("No hay playlists editables en Música.").font(.callout).foregroundStyle(.secondary)
+                        Text("No hay playlists editables.").font(.callout).foregroundStyle(.secondary)
                     } else if error == nil {
                         ProgressView("Cargando playlists…").controlSize(.small)
                     }

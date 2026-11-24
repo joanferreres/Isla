@@ -1,10 +1,25 @@
 import Foundation
+/// Which AI app finished a turn. Each one gets its own colour for the notch alert.
+public enum AlertSource:String,Codable,CaseIterable,Sendable {
+ case codex,claude,cursor
+ public var title:String { switch self { case .codex:return "Codex";case .claude:return "Claude";case .cursor:return "Cursor" } }
+ /// Brand-like RGB (0…1): OpenAI green, Claude orange, Cursor white.
+ public var rgb:(r:Double,g:Double,b:Double) {
+ switch self {
+ case .codex:return (0.06,0.78,0.55)
+ case .claude:return (0.85,0.47,0.34)
+ case .cursor:return (0.93,0.94,1.0)
+ }
+ }
+}
 public struct TurnCompletion:Codable,Equatable,Sendable {
  public var sessionID:String
  public var turnID:String
  public var timestamp:Date
  public var reportedTokens:Int?
- public init(sessionID:String,turnID:String,timestamp:Date,reportedTokens:Int?=nil) { self.sessionID=sessionID;self.turnID=turnID;self.timestamp=timestamp;self.reportedTokens=reportedTokens }
+ /// nil in old saved history = Codex.
+ public var source:AlertSource?
+ public init(sessionID:String,turnID:String,timestamp:Date,reportedTokens:Int?=nil,source:AlertSource?=nil) { self.sessionID=sessionID;self.turnID=turnID;self.timestamp=timestamp;self.reportedTokens=reportedTokens;self.source=source }
 }
 public enum CodexEvent:Sendable {
  case tokens(session:String,total:Int)
@@ -55,5 +70,21 @@ public enum CodexSessionMetadata {
  guard let row=try? JSONSerialization.jsonObject(with:line) as? [String:Any],row["type"] as? String == "session_meta",let p=row["payload"] as? [String:Any],p["parent_thread_id"] == nil,let source=p["source"] as? String,["cli","vscode","exec"].contains(source) else { return nil }
  if let thread=p["thread_source"] as? [String:Any],thread["subagent"] != nil { return nil }
  return (p["session_id"] as? String) ?? (p["id"] as? String)
+ }
+}
+
+/// Claude Code writes one JSON line per message to ~/.claude/projects/**/*.jsonl.
+/// A turn is over when the main (non-subagent) assistant message ends with `stop_reason: end_turn`.
+public enum ClaudeTurnEvent {
+ public static func completion(line:Data) -> TurnCompletion? {
+ // Cheap pre-filter: most lines are huge tool results we never need to parse.
+ guard line.range(of:Data("end_turn".utf8)) != nil,
+ let row=try? JSONSerialization.jsonObject(with:line) as? [String:Any],
+ row["type"] as? String == "assistant",row["isSidechain"] as? Bool != true,
+ let message=row["message"] as? [String:Any],message["stop_reason"] as? String == "end_turn",
+ let session=row["sessionId"] as? String,let id=row["uuid"] as? String else { return nil }
+ let fractional=ISO8601DateFormatter();fractional.formatOptions=[.withInternetDateTime,.withFractionalSeconds]
+ let stamp=(row["timestamp"] as? String).flatMap{ fractional.date(from:$0) ?? ISO8601DateFormatter().date(from:$0) } ?? Date()
+ return TurnCompletion(sessionID:session,turnID:id,timestamp:stamp,source:.claude)
  }
 }

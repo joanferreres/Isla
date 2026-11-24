@@ -5,6 +5,7 @@ import IslandCore
 @MainActor struct CompletionRailView:View {
  let trigger:UUID?
  let enabled:Bool
+ let source:AlertSource
  let reduceMotion:Bool
  let cornerRadius:CGFloat
  @State private var visible=false
@@ -15,18 +16,19 @@ import IslandCore
  let notchHeight:CGFloat
  let physicalNotch:Bool
  var body:some View {
+ let tint=Color(red:source.rgb.r,green:source.rgb.g,blue:source.rgb.b)
  GeometryReader { proxy in
  let frame=CompletionOutlineGeometry.frame(container:proxy.size,notchWidth:notchWidth,notchHeight:notchHeight,physicalNotch:physicalNotch)
  let contour=CompletionContour(physicalNotch:physicalNotch,cornerRadius:cornerRadius)
  ZStack {
  if visible && enabled {
  CompletionBacking(container:proxy.size,outlineFrame:frame,physicalNotch:physicalNotch,cornerRadius:cornerRadius).fill(.black,style:FillStyle(eoFill:true))
- contour.stroke(Color.mint.opacity(0.95),style:StrokeStyle(lineWidth:4,lineCap:.round))
- AngularGradient(colors:[.clear,.clear,.mint,.white.opacity(0.85),.mint,.clear],center:.center)
+ contour.stroke(tint.opacity(0.95),style:StrokeStyle(lineWidth:4,lineCap:.round))
+ AngularGradient(colors:[.clear,.clear,tint,.white.opacity(0.85),tint,.clear],center:.center)
  .scaleEffect(1.5)
  .rotationEffect(.degrees(phase*360))
  .mask(contour.stroke(style:StrokeStyle(lineWidth:4,lineCap:.round)))
- .shadow(color:.mint.opacity(0.85),radius:6)
+ .shadow(color:tint.opacity(0.85),radius:6)
  }
  }.frame(width:frame.width,height:frame.height)
  .position(x:frame.midX,y:frame.midY)

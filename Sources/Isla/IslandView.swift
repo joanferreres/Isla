@@ -59,7 +59,7 @@ import IslandCore
  }
  if expanded {
  VStack(spacing:8) {
- if activity.latest != nil && section == "IA" { Button("Codex ha terminado · Abrir") { activity.openCodex() }.buttonStyle(.plain).font(.caption).foregroundStyle(.mint) }
+ if let done=activity.latest,section == "IA" { let source=done.source ?? .codex;Button("\(source.title) ha terminado · Abrir") { activity.open(source) }.buttonStyle(.plain).font(.caption).foregroundStyle(Color(red:source.rgb.r,green:source.rgb.g,blue:source.rgb.b)) }
  if section == "Archivos",preferences.value.filesEnabled { ShelfView(store:local,model:model,airDrop:airDrop) }
  else if section == "Inicio" { HomeView(model:model,music:music,calendar:calendar,preferences:preferences,usage:usage,activity:activity,openCodex:{ selectedAI=$0;model.section="IA" }).frame(maxWidth:.infinity,maxHeight:.infinity) }
  else if section == "IA" { AIUsageView(usage:usage,activity:activity,statistics:statistics,selected:$selectedAI) }
@@ -77,7 +77,7 @@ import IslandCore
  }.frame(width:width,height:expanded ? model.expandedSize.height : model.compactSize.height,alignment:.top)
  .foregroundStyle(.white).background(.black,in:UnevenRoundedRectangle(bottomLeadingRadius:expanded ? 24 : 12,bottomTrailingRadius:expanded ? 24 : 12))
  .overlay {
- CompletionRailView(trigger:activity.completionPulse,enabled:preferences.value.aiVisualEnabled,reduceMotion:reduced,cornerRadius:expanded ? 24 : 12,notchWidth:model.notchWidth,notchHeight:model.headerHeight,physicalNotch:model.hasPhysicalNotch)
+ CompletionRailView(trigger:activity.completionPulse,enabled:preferences.value.aiVisualEnabled,source:activity.completionSource,reduceMotion:reduced,cornerRadius:expanded ? 24 : 12,notchWidth:model.notchWidth,notchHeight:model.headerHeight,physicalNotch:model.hasPhysicalNotch)
  }
  .shadow(color:.black.opacity(expanded ? 0.3 : 0),radius:12,y:6)
  .animation(reduced ? .easeOut(duration:0.15) : .spring(response:0.35,dampingFraction:0.9),value:model.compactSize)

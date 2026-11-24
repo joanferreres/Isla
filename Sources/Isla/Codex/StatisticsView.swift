@@ -16,7 +16,7 @@ import Charts
  else {
  Chart { ForEach(Array(readings.enumerated()),id:\.offset) { _,reading in ForEach(reading.windows) { window in
  PointMark(x:.value("Fecha",reading.fetchedAt),y:.value("Restante",window.remainingPercent)).foregroundStyle(by:.value("Ventana",window.id))
- } } }.chartYScale(domain:0...100).frame(height:110)
+ } } }.chartYScale(domain:0...100).frame(height:80)
  Text("Lecturas de uso restante; los huecos no representan consumo cero.").font(.caption2).foregroundStyle(.secondary)
  }
  if let error=statistics.error { Text(error).font(.caption2).foregroundStyle(.orange) }

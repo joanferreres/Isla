@@ -160,7 +160,7 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  }
  return event
  } { monitors.append(monitor) }
- model.$section.map { $0 == "Archivos" }.removeDuplicates().dropFirst().sink { [weak self] _ in DispatchQueue.main.async { self?.refreshGeometry() } }.store(in:&subscriptions)
+ model.$section.removeDuplicates().dropFirst().sink { [weak self] _ in DispatchQueue.main.async { self?.refreshGeometry() } }.store(in:&subscriptions)
  model.$state.map{ $0.expanded }.removeDuplicates().dropFirst().sink { [weak self] expanded in
  // Resize after @Published assigns; let the closing animation finish before shrinking the window.
  DispatchQueue.main.async {
@@ -210,7 +210,7 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  let width:CGFloat
  if let left=screen.auxiliaryTopLeftArea,let right=screen.auxiliaryTopRightArea { width=max(0,right.minX-left.maxX) } else { width=156 }
  model.headerHeight=height; model.notchWidth=width; model.hasPhysicalNotch=screen.safeAreaInsets.top > 0
- layout=IslandLayout(metrics:DisplayMetrics(id:displayID,frame:screen.frame,notchWidth:width,headerHeight:height,builtIn:CGDisplayIsBuiltin(displayID) != 0),expandedWidth:preferences.value.normalized().expandedWidth,expandedHeight:model.section == "Archivos" ? 190 : mediaPlaying ? 235 : 205)
+ layout=IslandLayout(metrics:DisplayMetrics(id:displayID,frame:screen.frame,notchWidth:width,headerHeight:height,builtIn:CGDisplayIsBuiltin(displayID) != 0),expandedWidth:preferences.value.normalized().expandedWidth,expandedHeight:model.section == "Archivos" ? 190 : model.section == "IA" ? 300 : mediaPlaying ? 235 : 205)
  if let layout { model.apply(layout);let frame=layout.windowFrame(expanded:model.state.expanded,sideWidth:model.sideWidth);if panel.frame != frame { panel.setFrame(frame,display:true) } }
  updatePointer()
  }

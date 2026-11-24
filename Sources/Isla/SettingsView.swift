@@ -95,7 +95,7 @@ enum SettingsPage:String,CaseIterable,Identifiable {
   ForEach(MusicSourcePreference.allCases,id:\.self) { source in Text(source.title).tag(source) }
  }.disabled(!store.value.musicEnabled)
  Toggle("EQ con IA",isOn:$store.value.musicClaudeEQEnabled)
-  .disabled(!store.value.musicEnabled || store.value.musicSource == .spotify)
+  .disabled(!store.value.musicEnabled)
  Toggle("Calendario",isOn:$store.value.calendarEnabled)
  Toggle("Bandeja de archivos",isOn:$store.value.filesEnabled)
  Toggle("Tocadiscos en el escritorio",isOn:$store.value.recordDesktopEnabled)
@@ -105,8 +105,9 @@ enum SettingsPage:String,CaseIterable,Identifiable {
  Section {
  Text("Apple Music y Spotify comparten carátula, canción actual, progreso, volumen, controles, tocadiscos y widget. En Automática se usa la app que esté reproduciendo.").font(.caption).foregroundStyle(.secondary)
  if let error=music.error { Text(error).font(.caption).foregroundStyle(.orange) }
- Text("Los mandos del tocadiscos ajustan el ecualizador de la app activa. Para Spotify, autoriza Isla en Accesibilidad. El EQ con IA, las playlists y el cambiador de discos son exclusivos de Apple Music.").font(.caption).foregroundStyle(.secondary)
+ Text("Los mandos del tocadiscos ajustan el ecualizador de la app activa. Para Spotify, autoriza Isla en Accesibilidad. El EQ con IA funciona en las dos. Las playlists y el cambiador de discos de Spotify necesitan conectar tu cuenta (más abajo).").font(.caption).foregroundStyle(.secondary)
  MusicAIEQKeySetup(enabled: store.value.musicClaudeEQEnabled && store.value.musicEnabled)
+ SpotifySetupView()
  } header: { Label("Música e IA EQ",systemImage:"music.note") }
  Section {
  if let error=calendar.error { Text(error).font(.caption).foregroundStyle(.orange) }
@@ -160,8 +161,8 @@ enum SettingsPage:String,CaseIterable,Identifiable {
  ForEach(AINotificationMode.allCases,id:\.self) { mode in Text(mode.title).tag(mode) }
  }
  Text("El botón junto a la chincheta alterna entre sonido y borde, solo borde o ningún aviso. La elección se guarda automáticamente.").font(.caption).foregroundStyle(.secondary)
- Button("Probar aviso") { activity.previewNotification() }.disabled(!store.value.aiVisualEnabled)
- Text("El borde verde intenso resalta la isla al terminar y se desvanece. Sin avisos también oculta el mensaje de finalización.").font(.caption).foregroundStyle(.secondary)
+ HStack { Text("Probar aviso");Spacer();ForEach(AlertSource.allCases,id:\.self) { source in Button(source.title) { activity.previewNotification(source:source) }.disabled(!store.value.aiVisualEnabled) } }
+ Text("El borde de color resalta la isla al terminar y se desvanece: verde para Codex, naranja para Claude y blanco para Cursor. Sin avisos también oculta el mensaje de finalización.").font(.caption).foregroundStyle(.secondary)
  Text("Ocultar Codex de Inicio conserva sus avisos y estadísticas si sigue conectado.").font(.caption).foregroundStyle(.secondary)
  } header: { Label("Avisos",systemImage:"bell") }
  }

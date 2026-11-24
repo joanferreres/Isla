@@ -141,7 +141,7 @@ struct RecordPlayerMixer: View {
 
     private var autoEQTaskID: String {
         let track = music.state.snapshot?.trackID ?? ""
-        let enabled = supportsEQ && preferences.value.musicClaudeEQEnabled && active && music.enabled
+        let enabled = preferences.value.musicClaudeEQEnabled && active && music.enabled
         let route = "\(audioOutput.output.kind.rawValue)|\(audioOutput.output.uid)"
         return "\(enabled)|\(track)|\(route)"
     }
@@ -308,6 +308,7 @@ struct RecordPlayerMixer: View {
 
     private func adjustSpotify(_ target: Double, band: MixerBand?) {
         guard active else { return }
+        preemptClaudeForUserEdit()
         let gain = min(12, max(-12, target)).rounded()
         // Show the new position right away; Spotify confirms (or corrects) it afterwards.
         if let band {
@@ -456,8 +457,8 @@ struct RecordPlayerMixer: View {
     }
 
     private func applyClaudeEQIfNeeded() async {
-        // Claude EQ drives Music's equalizer only; Spotify has no presets to pick from.
-        guard supportsEQ, preferences.value.musicClaudeEQEnabled, active, music.enabled else {
+        // Music uses its presets; Spotify only gets the three bands (no presets to pick from).
+        guard preferences.value.musicClaudeEQEnabled, active, music.enabled else {
             claudeStatus = nil
             return
         }
@@ -477,6 +478,7 @@ struct RecordPlayerMixer: View {
            lastAppliedAdvice != nil {
             lastClaudeTrackID = snapshot.trackID
             let status = "\(lastAppliedAdvice?.genre ?? libraryGenre) · mismo género · \(output.shortLabel)"
+            if !supportsEQ { claudeStatus = status;return }
             do {
                 try await equalizer.reassertPlayback()
                 if !Task.isCancelled {
@@ -515,13 +517,13 @@ struct RecordPlayerMixer: View {
         // Manual preempt flips Claude off; skip if the user already took ownership.
         guard preferences.value.musicClaudeEQEnabled, active else { return }
         guard music.state.snapshot?.trackID == snapshot.trackID else { return }
-        if presets.isEmpty { await loadPresets() }
+        if supportsEQ, presets.isEmpty { await loadPresets() }
         claudeStatus = "Claude EQ · \(output.shortLabel)…"
         do {
             let advice = try await claudeEQ.advise(
                 title: snapshot.title,
                 artist: snapshot.artist,
-                presets: presets,
+                presets: supportsEQ ? presets : [],
                 output: output,
                 musicGenre: libraryGenre,
                 interactiveAuth: false
@@ -549,6 +551,33 @@ struct RecordPlayerMixer: View {
 
     private func applyClaudeAdvice(_ advice: MusicClaudeEQService.Advice, outputLabel: String, reused: Bool) {
         guard preferences.value.musicClaudeEQEnabled else { return }
+        if !supportsEQ {
+            // Spotify: apply Claude's three bands through its own equalizer.
+            let target: [MixerBand: Double] = [
+                .bass: advice.bass.rounded(), .mid: advice.mid.rounded(), .treble: advice.treble.rounded()
+            ]
+            let status = reused
+                ? "\(advice.genre) · bandas · mismo género · \(outputLabel)"
+                : "\(advice.genre) · bandas · \(outputLabel) · \(advice.provider)"
+            claudeStatus = "Aplicando bandas en Spotify…"
+            gains = target
+            Task {
+                do {
+                    let result = try await applySpotifyBands(target)
+                    guard preferences.value.musicClaudeEQEnabled else { return }
+                    gains = result.mapValues { $0.rounded() }
+                    selectedPreset = Self.claudeStyleName
+                    spotifyEQError = nil
+                    claudeStatus = status
+                } catch MusicEqualizer.Failure.access {
+                    claudeStatus = "Permite Isla en Privacidad y seguridad → Accesibilidad para ajustar Spotify."
+                    lastClaudeTrackID = nil
+                } catch {
+                    claudeStatus = error.localizedDescription
+                }
+            }
+            return
+        }
         if let preset = advice.preset {
             // Don't preview Claude's numeric guess then replace it with the
             // factory preset averages — that "weird switch" looked like snap-back.
