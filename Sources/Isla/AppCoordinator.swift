@@ -31,6 +31,7 @@ import IslandCore
  preferences.value.recordDesktopEnabled = UserDefaults.standard.bool(forKey:"recordPlayer.desktopEnabled")
  UserDefaults.standard.set(true,forKey:"recordDesktopPreferenceMigrated")
  }
+ AdaptiveEQController.shared.configure(preferences: preferences, music: music)
  music.$state.sink { [weak self] state in self?.recordWidget.update(state) }.store(in:&integrationSubscriptions)
  activity.onCompletion = { [weak self] event in if (event.source ?? .codex) == .codex { self?.statistics.record(event) } }
  usage.onSnapshot = { [weak self] snapshot in self?.statistics.record(snapshot) }

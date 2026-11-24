@@ -8,47 +8,35 @@ struct RecordPlayerMixer: View {
     let active: Bool
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @ObservedObject private var eq = AdaptiveEQController.shared
+    /// Apple Music's own factory presets (driven through Music's equalizer window).
     @State private var equalizer = MusicEqualizer()
-    @State private var claudeEQ = MusicClaudeEQService()
-    @State private var gains: [MixerBand: Double] = [:]
-    @State private var eqFailure: MusicEqualizer.Failure?
-    @State private var eqRevision = 0
+    @State private var presets: [String] = []
+    @State private var selectedPreset: String?
+    @State private var presetMode = false
+    @State private var presetGains: [MixerBand: Double] = [:]
     @State private var showAccess = false
     @State private var offeredAccess = false
+    @State private var presetError: String?
     @State private var volume: Int?
     @State private var confirmedVolume: Int?
     @State private var volumeRequest: Int?
     @State private var volumeError: String?
-    @State private var presets: [String] = []
-    @State private var selectedPreset: String?
-    @State private var claudeStatus: String?
-    @State private var lastClaudeTrackID: String?
-    @State private var lastClaudeOutputKey: String?
-    /// Normalized genre currently driving EQ (Music library or last Claude label).
-    @State private var currentGenreKey: String?
-    @State private var lastAppliedAdvice: MusicClaudeEQService.Advice?
-    @StateObject private var audioOutput = MusicAudioOutputMonitor()
 
-    /// Style entry in the EQ menu — enables Claude auto-EQ (not a Music factory preset).
-    private static let claudeStyleName = "Claude"
-    private var supportsEQ:Bool { music.state.snapshot?.source != .spotify }
-    @State private var spotifyEqualizer = SpotifyEqualizer()
-    @State private var spotifyEQError: String?
-    @State private var spotifyEQBusy = false
-    /// Latest Spotify change requested while another one was still being applied (nil band = all).
-    @State private var spotifyPending: (gain: Double, band: MixerBand?)?
+    private var supportsPresets: Bool { music.state.snapshot?.source != .spotify }
+    private var displayGains: [MixerBand: Double] { presetMode ? presetGains : eq.gains }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                if supportsEQ { presetMenu }
+                presetMenu
                 Spacer(minLength: 0)
                 resetButton
             }
             HStack(spacing: 15) {
                 VStack(spacing: 7) {
                     ForEach(MixerBand.allCases, id: \.self) { band in
-                        EQKnob(title: band.title, gain: gains[band], accent: palette.accent) { value in
+                        EQKnob(title: band.title, gain: displayGains[band], accent: palette.accent) { value in
                             adjust(value, band: band)
                         }
                         .disabled(!active)
@@ -57,8 +45,8 @@ struct RecordPlayerMixer: View {
                 volumeFader
             }
             .fixedSize(horizontal: false, vertical: true)
-            if preferences.value.musicClaudeEQEnabled {
-                Text(claudeStatus ?? "Estilo Claude — EQ según música y salida (\(audioOutput.output.shortLabel))")
+            if !presetMode, let status = eq.status {
+                Text(status)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -66,12 +54,11 @@ struct RecordPlayerMixer: View {
             if let volumeError {
                 Text(volumeError).font(.caption2).foregroundStyle(.secondary)
             }
-            if !supportsEQ, let spotifyEQError {
-                Text(spotifyEQError).font(.caption2).foregroundStyle(.secondary)
+            if let presetError {
+                Text(presetError).font(.caption2).foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 10)
-        .help(eqFailure?.localizedDescription ?? claudeStatus ?? "")
         .alert("Controlar el ecualizador de Música", isPresented: $showAccess) {
             Button("Abrir Accesibilidad") {
                 if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
@@ -82,39 +69,10 @@ struct RecordPlayerMixer: View {
         } message: {
             Text(MusicEqualizer.Failure.access.localizedDescription)
         }
-        .task(id: "\(active)|\(supportsEQ)|\(music.sourceTitle)") {
-            audioOutput.setActive(active)
+        .task(id: "\(active)|\(supportsPresets)|\(music.sourceTitle)") {
             guard active else { return }
             await readVolume()
-            guard supportsEQ else { gains = [:]; return }
-            await loadPresets()
-            if let current = try? await equalizer.read(), !Task.isCancelled {
-                gains = current
-                eqFailure = nil
-            }
-            if preferences.value.musicClaudeEQEnabled {
-                selectedPreset = Self.claudeStyleName
-            } else if let name = try? await equalizer.currentPresetName(), !Task.isCancelled {
-                selectedPreset = name
-            }
-        }
-        .onChange(of: preferences.value.musicClaudeEQEnabled) { _, enabled in
-            if enabled {
-                selectedPreset = Self.claudeStyleName
-                lastClaudeTrackID = nil
-                lastClaudeOutputKey = nil
-                currentGenreKey = nil
-                lastAppliedAdvice = nil
-            } else if selectedPreset == Self.claudeStyleName {
-                selectedPreset = nil
-            }
-        }
-        .onChange(of: audioOutput.output) { _, _ in
-            // Re-tune when switching AirPods ↔ speakers (or any default output).
-            lastClaudeTrackID = nil
-            lastClaudeOutputKey = nil
-            currentGenreKey = nil
-            lastAppliedAdvice = nil
+            if supportsPresets { await loadPresets() } else { presetMode = false; selectedPreset = nil }
         }
         .task(id: volumeRequest) {
             guard let target = volumeRequest else { return }
@@ -134,37 +92,23 @@ struct RecordPlayerMixer: View {
             }
             if !Task.isCancelled { volumeRequest = nil }
         }
-        .task(id: autoEQTaskID) {
-            await applyClaudeEQIfNeeded()
-        }
-    }
-
-    private var autoEQTaskID: String {
-        let track = music.state.snapshot?.trackID ?? ""
-        let enabled = preferences.value.musicClaudeEQEnabled && active && music.enabled
-        let route = "\(audioOutput.output.kind.rawValue)|\(audioOutput.output.uid)"
-        return "\(enabled)|\(track)|\(route)"
     }
 
     @ViewBuilder private var presetMenu: some View {
-        let label = preferences.value.musicClaudeEQEnabled
-            ? Self.claudeStyleName
-            : (selectedPreset ?? "Estilo EQ")
+        let adaptive = preferences.value.musicClaudeEQEnabled
+        let label = presetMode ? (selectedPreset ?? "Preset") : (adaptive ? "Adaptative" : "Manual")
         let menu = Menu {
-            Button(Self.claudeStyleName) { enableClaudeStyle() }
-            if !presets.isEmpty { Divider() }
-            if presets.isEmpty {
-                Text("Sin presets de Música").foregroundStyle(.secondary)
-            } else {
+            Button("Adaptative") { chooseAdaptive() }
+            if supportsPresets, !presets.isEmpty {
+                Divider()
                 ForEach(presets, id: \.self) { name in
                     Button(name) { applyPreset(name) }
                 }
             }
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: preferences.value.musicClaudeEQEnabled ? "sparkles" : "slider.horizontal.3")
-                Text(label)
-                    .lineLimit(1)
+                Image(systemName: adaptive && !presetMode ? "waveform.path" : "slider.horizontal.3")
+                Text(label).lineLimit(1)
             }
             .font(.caption.weight(.medium))
             .frame(maxWidth: 132, alignment: .leading)
@@ -172,7 +116,7 @@ struct RecordPlayerMixer: View {
         .controlSize(.small)
         .disabled(!active)
         .accessibilityLabel("Estilo del ecualizador")
-        .help("Elige «Claude» para auto-EQ por tipo de música, o un preset de fábrica de Música. Un toque manual cancela Claude al instante.")
+        .help("Adaptative analiza la música y la salida (altavoces, auriculares, AirPods) y ajusta el sonido solo. Un toque manual lo desactiva.")
         if #available(macOS 26.0, *), !reduceTransparency {
             menu.menuStyle(.borderlessButton)
         } else {
@@ -182,18 +126,8 @@ struct RecordPlayerMixer: View {
 
     @ViewBuilder private var resetButton: some View {
         let button = Button {
-            if !supportsEQ {
-                adjustSpotify(0, band: nil)
-                return
-            }
-            preemptClaudeForUserEdit()
-            let neutral = Dictionary(uniqueKeysWithValues: MixerBand.allCases.map { ($0, 0.0) })
-            applyEQ(preview: neutral, userInitiated: true) {
-                await equalizer.invalidatePendingWrites()
-                let result = try await equalizer.reset()
-                selectedPreset = try? await equalizer.currentPresetName()
-                return result
-            }
+            leavePreset()
+            eq.resetFlat()
         } label: {
             Image(systemName: "arrow.counterclockwise")
                 .font(.caption.weight(.medium))
@@ -289,109 +223,44 @@ struct RecordPlayerMixer: View {
     }
 
     private func adjust(_ target: Double, band: MixerBand) {
-        if !supportsEQ {
-            adjustSpotify(target, band: band)
-            return
-        }
-        // Manual knob preempts Claude immediately — never wait on an in-flight auto-EQ latch.
-        preemptClaudeForUserEdit()
-        var preview = gains
-        for missing in MixerBand.allCases where preview[missing] == nil { preview[missing] = 0 }
-        preview[band] = min(12, max(-12, target))
-        applyEQ(preview: preview, userInitiated: true) {
-            await equalizer.invalidatePendingWrites()
-            let result = try await equalizer.setAll(preview)
-            selectedPreset = "Manual"
-            return result
-        }
-    }
-
-    private func adjustSpotify(_ target: Double, band: MixerBand?) {
         guard active else { return }
-        preemptClaudeForUserEdit()
-        let gain = min(12, max(-12, target)).rounded()
-        // Show the new position right away; Spotify confirms (or corrects) it afterwards.
-        if let band {
-            gains[band] = gain
-        } else {
-            for each in MixerBand.allCases { gains[each] = gain }
-        }
-        // A change made while Spotify is busy is kept and applied next, never dropped.
-        if spotifyEQBusy {
-            if let pending = spotifyPending, pending.band != band {
-                spotifyPending = (gain, nil) // two different bands: re-send all bands from `gains`
-            } else {
-                spotifyPending = (gain, band)
-            }
-            return
-        }
-        spotifyEQBusy = true
-        spotifyEQError = nil
-        Task {
-            var next: (gain: Double, band: MixerBand?)? = (gain, band)
-            while let request = next {
-                do {
-                    let result: [MixerBand: Double]
-                    if request.band == nil, spotifyPending == nil, Set(gains.values).count > 1 {
-                        result = try await applySpotifyBands(gains)
-                    } else {
-                        result = try await spotifyEqualizer.apply(request.gain, band: request.band)
-                    }
-                    if !supportsEQ, spotifyPending == nil {
-                        gains = result.mapValues { $0.rounded() }
-                    }
-                } catch MusicEqualizer.Failure.access {
-                    spotifyEQError = "Permite Isla en Privacidad y seguridad → Accesibilidad para ajustar Spotify."
-                    spotifyPending = nil
-                } catch {
-                    spotifyEQError = error.localizedDescription
-                    spotifyPending = nil
-                }
-                next = spotifyPending
-                spotifyPending = nil
-            }
-            spotifyEQBusy = false
-        }
+        leavePreset()
+        eq.setManual(band, target)
     }
 
-    /// Sends each band's own value (used when several knobs changed while Spotify was busy).
-    private func applySpotifyBands(_ target: [MixerBand: Double]) async throws -> [MixerBand: Double] {
-        var result: [MixerBand: Double] = [:]
-        for band in MixerBand.allCases {
-            result = try await spotifyEqualizer.apply(target[band] ?? 0, band: band)
-        }
-        return result
+    private func chooseAdaptive() {
+        leavePreset()
+        eq.enableAdaptive()
     }
 
-    private func enableClaudeStyle() {
-        preferences.value.musicClaudeEQEnabled = true
-        selectedPreset = Self.claudeStyleName
-        lastClaudeTrackID = nil
-        lastClaudeOutputKey = nil
-        currentGenreKey = nil
-        lastAppliedAdvice = nil
-        claudeStatus = "Estilo Claude — EQ según música y \(audioOutput.output.shortLabel)"
-    }
-
-    private func disableClaudeStyle() {
-        guard preferences.value.musicClaudeEQEnabled else { return }
-        preferences.value.musicClaudeEQEnabled = false
-        claudeStatus = nil
-    }
-
-    /// Drop Claude ownership so any in-flight auto-EQ aborts before writing again.
-    private func preemptClaudeForUserEdit() {
-        disableClaudeStyle()
+    /// Leaving an Apple Music preset puts Music's own EQ flat so it never stacks with Isla's.
+    private func leavePreset() {
+        guard presetMode else { return }
+        presetMode = false
+        selectedPreset = nil
+        Task { _ = try? await equalizer.reset() }
     }
 
     private func applyPreset(_ name: String) {
-        preemptClaudeForUserEdit()
-        applyEQ(preview: gains, userInitiated: true) {
-            // Invalidate Claude's latch before this write joins the equalizer actor queue.
-            await equalizer.invalidatePendingWrites()
-            let result = try await equalizer.selectPreset(name)
-            selectedPreset = name
-            return result
+        guard active else { return }
+        eq.resetFlat()
+        presetMode = true
+        selectedPreset = name
+        presetError = nil
+        Task {
+            do {
+                await equalizer.invalidatePendingWrites()
+                presetGains = try await equalizer.selectPreset(name)
+            } catch {
+                let failure = (error as? MusicEqualizer.Failure) ?? .unresponsive
+                presetMode = false
+                selectedPreset = nil
+                presetError = failure.localizedDescription
+                if failure == .access, !offeredAccess {
+                    offeredAccess = true
+                    showAccess = true
+                }
+            }
         }
     }
 
@@ -401,259 +270,9 @@ struct RecordPlayerMixer: View {
             guard !Task.isCancelled else { return }
             presets = names
         } catch {
-            if !Task.isCancelled {
-                let failure = (error as? MusicEqualizer.Failure) ?? .unresponsive
-                eqFailure = failure
-                if failure == .access, !offeredAccess {
-                    offeredAccess = true
-                    showAccess = true
-                }
-            }
-        }
-    }
-
-    private func applyEQ(
-        preview: [MixerBand: Double],
-        successStatus: String? = nil,
-        userInitiated: Bool = false,
-        operation: @escaping () async throws -> [MixerBand: Double]
-    ) {
-        guard active else { return }
-        let confirmed = gains
-        let confirmedPreset = selectedPreset
-        let confirmedStatus = claudeStatus
-        gains = preview
-        eqRevision += 1
-        let revision = eqRevision
-        Task {
-            do {
-                let result = try await operation()
-                if revision == eqRevision {
-                    gains = result
-                    eqFailure = nil
-                    if let successStatus { claudeStatus = successStatus }
-                }
-            } catch let failure as MusicEqualizer.Failure where failure == .superseded {
-                // Newer write won — leave that revision's preview alone.
-            } catch {
-                if revision == eqRevision {
-                    gains = confirmed
-                    selectedPreset = confirmedPreset
-                    let failure = (error as? MusicEqualizer.Failure) ?? .unresponsive
-                    eqFailure = failure
-                    if successStatus != nil {
-                        claudeStatus = failure.localizedDescription
-                    } else if !userInitiated, confirmedStatus != nil,
-                              failure == .silent || failure == .access {
-                        claudeStatus = failure.localizedDescription
-                    }
-                    if failure == .access, !offeredAccess {
-                        offeredAccess = true
-                        showAccess = true
-                    }
-                }
-            }
-        }
-    }
-
-    private func applyClaudeEQIfNeeded() async {
-        // Music uses its presets; Spotify only gets the three bands (no presets to pick from).
-        guard preferences.value.musicClaudeEQEnabled, active, music.enabled else {
-            claudeStatus = nil
-            return
-        }
-        guard let snapshot = music.state.snapshot, !snapshot.title.isEmpty else { return }
-        let output = audioOutput.output
-        let outputKey = "\(output.kind.rawValue)|\(output.uid)"
-        if snapshot.trackID == lastClaudeTrackID, outputKey == lastClaudeOutputKey { return }
-
-        if !preferences.value.musicEQUsesAI {
-            await applyLocalEQ(snapshot: snapshot, output: output, outputKey: outputKey)
-            return
-        }
-
-        let libraryGenre = snapshot.genre
-        let libraryKey = MusicClaudeEQService.normalizeGenre(libraryGenre)
-
-        // Same genre + same output → keep EQ curve, skip Claude/API tokens.
-        // Still reassert EQ On — Music sometimes leaves the equalizer off after a track change.
-        if !libraryKey.isEmpty,
-           libraryKey == currentGenreKey,
-           outputKey == lastClaudeOutputKey,
-           lastAppliedAdvice != nil {
-            lastClaudeTrackID = snapshot.trackID
-            let status = "\(lastAppliedAdvice?.genre ?? libraryGenre) · mismo género · \(output.shortLabel)"
-            if !supportsEQ { claudeStatus = status;return }
-            do {
-                try await equalizer.reassertPlayback()
-                if !Task.isCancelled {
-                    claudeStatus = status
-                    eqFailure = nil
-                }
-            } catch {
-                guard !Task.isCancelled else { return }
-                let failure = (error as? MusicEqualizer.Failure) ?? .unresponsive
-                eqFailure = failure
-                claudeStatus = failure.localizedDescription
-                // Allow retry on the next tick / same track when latch was silent.
-                if failure == .silent || failure == .access || failure == .closed {
-                    lastClaudeTrackID = nil
-                }
-                if failure == .access, !offeredAccess {
-                    offeredAccess = true
-                    showAccess = true
-                }
-            }
-            return
-        }
-        if !libraryKey.isEmpty,
-           let cached = await claudeEQ.cachedAdvice(genre: libraryGenre, output: output) {
-            guard preferences.value.musicClaudeEQEnabled, active else { return }
-            applyClaudeAdvice(cached, outputLabel: output.shortLabel, reused: true)
-            currentGenreKey = libraryKey
-            lastAppliedAdvice = cached
-            lastClaudeTrackID = snapshot.trackID
-            lastClaudeOutputKey = outputKey
-            return
-        }
-
-        try? await Task.sleep(for: .milliseconds(450))
-        guard !Task.isCancelled else { return }
-        // Manual preempt flips Claude off; skip if the user already took ownership.
-        guard preferences.value.musicClaudeEQEnabled, active else { return }
-        guard music.state.snapshot?.trackID == snapshot.trackID else { return }
-        if supportsEQ, presets.isEmpty { await loadPresets() }
-        claudeStatus = "Claude EQ · \(output.shortLabel)…"
-        do {
-            let advice = try await claudeEQ.advise(
-                title: snapshot.title,
-                artist: snapshot.artist,
-                presets: supportsEQ ? presets : [],
-                output: output,
-                musicGenre: libraryGenre,
-                interactiveAuth: false
-            )
-            guard !Task.isCancelled, music.state.snapshot?.trackID == snapshot.trackID else { return }
-            // User may have grabbed Manual/knobs while Claude was thinking.
-            guard preferences.value.musicClaudeEQEnabled, active else { return }
-            applyClaudeAdvice(advice, outputLabel: output.shortLabel, reused: false)
-            currentGenreKey = !libraryKey.isEmpty ? libraryKey : MusicClaudeEQService.normalizeGenre(advice.genre)
-            lastAppliedAdvice = advice
-            lastClaudeTrackID = snapshot.trackID
-            lastClaudeOutputKey = outputKey
-        } catch let failure as MusicClaudeEQService.Failure {
-            guard !Task.isCancelled else { return }
-            claudeStatus = failure.localizedDescription
-            // Auth can be fixed mid-session — allow retry on the same track.
-            if case .auth = failure { return }
-            lastClaudeTrackID = snapshot.trackID
-        } catch {
-            guard !Task.isCancelled else { return }
-            claudeStatus = error.localizedDescription
-            lastClaudeTrackID = snapshot.trackID
-        }
-    }
-
-    /// Free, offline auto-EQ: measure the real audio, compare with a balanced target and
-    /// shift that target for the current output device (AirPods, headphones, speakers).
-    private func applyLocalEQ(snapshot: MediaSnapshot, output: MusicAudioOutput, outputKey: String) async {
-        let bundle = snapshot.source == .spotify ? "com.spotify.client" : "com.apple.Music"
-        claudeStatus = "Analizando el audio · \(output.shortLabel)…"
-        try? await Task.sleep(for: .milliseconds(900))
-        guard !Task.isCancelled, preferences.value.musicClaudeEQEnabled,
-              music.state.snapshot?.trackID == snapshot.trackID else { return }
-        do {
-            let result = try await ProcessAudioTap.measure(bundleID: bundle)
-            guard !Task.isCancelled, preferences.value.musicClaudeEQEnabled, active,
-                  music.state.snapshot?.trackID == snapshot.trackID else { return }
-            let neutral = MusicClaudeEQService.Advice(genre: "", preset: nil, bass: 0, mid: 0, treble: 0)
-            let bias = output.adapted(neutral)
-            let gains = SpectrumBalance.gains(
-                for: result,
-                currentGains: .init(bass: self.gains[.bass] ?? 0, mid: self.gains[.mid] ?? 0, treble: self.gains[.treble] ?? 0),
-                outputBias: .init(bass: bias.bass, mid: bias.mid, treble: bias.treble))
-            var advice = MusicClaudeEQService.Advice(
-                genre: "análisis local", preset: nil, bass: gains.bass, mid: gains.mid, treble: gains.treble)
-            advice.provider = "Local"
-            lastAppliedAdvice = advice
-            lastClaudeTrackID = snapshot.trackID
-            lastClaudeOutputKey = outputKey
-            applyClaudeAdvice(advice, outputLabel: output.shortLabel, reused: false)
-        } catch is CancellationError {
-            return
-        } catch {
-            guard !Task.isCancelled else { return }
-            claudeStatus = error.localizedDescription
-            lastClaudeTrackID = snapshot.trackID
-            lastClaudeOutputKey = outputKey
-        }
-    }
-
-    private func applyClaudeAdvice(_ advice: MusicClaudeEQService.Advice, outputLabel: String, reused: Bool) {
-        guard preferences.value.musicClaudeEQEnabled else { return }
-        if !supportsEQ {
-            // Spotify: apply Claude's three bands through its own equalizer.
-            let target: [MixerBand: Double] = [
-                .bass: advice.bass.rounded(), .mid: advice.mid.rounded(), .treble: advice.treble.rounded()
-            ]
-            let status = reused
-                ? "\(advice.genre) · bandas · mismo género · \(outputLabel)"
-                : "\(advice.genre) · bandas · \(outputLabel) · \(advice.provider)"
-            claudeStatus = "Aplicando bandas en Spotify…"
-            gains = target
-            Task {
-                do {
-                    let result = try await applySpotifyBands(target)
-                    guard preferences.value.musicClaudeEQEnabled else { return }
-                    gains = result.mapValues { $0.rounded() }
-                    selectedPreset = Self.claudeStyleName
-                    spotifyEQError = nil
-                    claudeStatus = status
-                } catch MusicEqualizer.Failure.access {
-                    claudeStatus = "Permite Isla en Privacidad y seguridad → Accesibilidad para ajustar Spotify."
-                    lastClaudeTrackID = nil
-                } catch {
-                    claudeStatus = error.localizedDescription
-                }
-            }
-            return
-        }
-        if let preset = advice.preset {
-            // Don't preview Claude's numeric guess then replace it with the
-            // factory preset averages — that "weird switch" looked like snap-back.
-            let status = reused
-                ? "\(advice.genre) · \(preset) · mismo género · \(outputLabel)"
-                : "\(advice.genre) · \(preset) · \(outputLabel) · \(advice.provider)"
-            claudeStatus = "Aplicando \(preset)…"
-            applyEQ(preview: gains, successStatus: status) {
-                guard preferences.value.musicClaudeEQEnabled else {
-                    throw MusicEqualizer.Failure.superseded
-                }
-                let result = try await equalizer.selectPreset(preset)
-                guard preferences.value.musicClaudeEQEnabled else {
-                    throw MusicEqualizer.Failure.superseded
-                }
-                selectedPreset = Self.claudeStyleName
-                return result
-            }
-        } else {
-            let target: [MixerBand: Double] = [
-                .bass: advice.bass, .mid: advice.mid, .treble: advice.treble
-            ]
-            let status = reused
-                ? "\(advice.genre) · bandas · mismo género · \(outputLabel)"
-                : "\(advice.genre) · bandas · \(outputLabel) · \(advice.provider)"
-            claudeStatus = "Aplicando bandas…"
-            applyEQ(preview: target, successStatus: status) {
-                guard preferences.value.musicClaudeEQEnabled else {
-                    throw MusicEqualizer.Failure.superseded
-                }
-                let result = try await equalizer.setAll(target)
-                guard preferences.value.musicClaudeEQEnabled else {
-                    throw MusicEqualizer.Failure.superseded
-                }
-                selectedPreset = Self.claudeStyleName
-                return result
+            if !Task.isCancelled, let failure = error as? MusicEqualizer.Failure, failure == .access, !offeredAccess {
+                offeredAccess = true
+                showAccess = true
             }
         }
     }

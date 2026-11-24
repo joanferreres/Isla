@@ -94,10 +94,8 @@ enum SettingsPage:String,CaseIterable,Identifiable {
  Picker("Fuente",selection:$store.value.musicSource) {
   ForEach(MusicSourcePreference.allCases,id:\.self) { source in Text(source.title).tag(source) }
  }.disabled(!store.value.musicEnabled)
- Toggle("EQ automático",isOn:$store.value.musicClaudeEQEnabled)
+ Toggle("EQ Adaptative",isOn:$store.value.musicClaudeEQEnabled)
   .disabled(!store.value.musicEnabled)
- Toggle("Usar IA (API key) en vez del análisis local",isOn:$store.value.musicEQUsesAI)
-  .disabled(!store.value.musicEnabled || !store.value.musicClaudeEQEnabled)
  Toggle("Calendario",isOn:$store.value.calendarEnabled)
  Toggle("Bandeja de archivos",isOn:$store.value.filesEnabled)
  Toggle("Tocadiscos en el escritorio",isOn:$store.value.recordDesktopEnabled)
@@ -107,10 +105,9 @@ enum SettingsPage:String,CaseIterable,Identifiable {
  Section {
  Text("Apple Music y Spotify comparten carátula, canción actual, progreso, volumen, controles, tocadiscos y widget. En Automática se usa la app que esté reproduciendo.").font(.caption).foregroundStyle(.secondary)
  if let error=music.error { Text(error).font(.caption).foregroundStyle(.orange) }
- Text("Los mandos del tocadiscos ajustan el ecualizador de la app activa. Para Spotify, autoriza Isla en Accesibilidad. El EQ automático analiza el audio en tu Mac (sin coste) y se adapta a la salida: auriculares, AirPods o altavoces. Pide permiso de captura de audio la primera vez. Las playlists y el cambiador de discos de Spotify necesitan conectar tu cuenta (más abajo).").font(.caption).foregroundStyle(.secondary)
- MusicAIEQKeySetup(enabled: store.value.musicClaudeEQEnabled && store.value.musicEnabled && store.value.musicEQUsesAI)
+ Text("El EQ Adaptative analiza el audio de la app en tu Mac (sin API ni coste) y ajusta graves, medios y agudos según la salida: auriculares, AirPods o altavoces. Isla procesa el sonido ella misma, así que funciona igual con Spotify y Apple Music sin tocar sus ajustes. Pide permiso de captura de audio la primera vez. Las playlists y el cambiador de discos de Spotify necesitan conectar tu cuenta (más abajo).").font(.caption).foregroundStyle(.secondary)
  SpotifySetupView()
- } header: { Label("Música e IA EQ",systemImage:"music.note") }
+ } header: { Label("Música y EQ",systemImage:"music.note") }
  Section {
  if let error=calendar.error { Text(error).font(.caption).foregroundStyle(.orange) }
  if calendar.enabled {
@@ -215,126 +212,5 @@ enum SettingsPage:String,CaseIterable,Identifiable {
  store.value.selectedCalendarIDs=ids.isEmpty ? ["__none__"] : ids
  calendar.refresh()
  })
- }
-}
-
-/// SecureFields for Claude + ChatGPT API keys used by music AI EQ (keychain).
-private struct MusicAIEQKeySetup: View {
- let enabled: Bool
- @State private var advisor = MusicClaudeEQService()
- @State private var hasClaudeKey = false
- @State private var hasOpenAIKey = false
- @State private var claudeDraft = ""
- @State private var openAIDraft = ""
- @State private var status: String?
- @State private var busy = false
-
- var body: some View {
- VStack(alignment: .leading, spacing: 10) {
-  Text("Las keys se guardan en el llavero de macOS (no en texto plano). El EQ solo usa API keys, nunca tu sesión de Claude Code.")
-   .font(.caption)
-   .foregroundStyle(.secondary)
-
-  keyRow(
-   title: "Claude (Anthropic)",
-   placeholder: "sk-ant-…",
-   draft: $claudeDraft,
-   hasKey: hasClaudeKey,
-   saveLabel: "Guardar Claude",
-   onSave: {
-    try await advisor.saveClaudeAPIKey(claudeDraft)
-    claudeDraft = ""
-    hasClaudeKey = true
-    status = "API key guardada — comprobando Claude (Haiku)…"
-    do {
-     try await advisor.verifyClaudeAPIKey()
-     status = "API key de Claude OK (Haiku responde)."
-    } catch {
-     status = "Key guardada, pero la prueba falló: \(error.localizedDescription)"
-    }
-   },
-   onClear: {
-    await advisor.clearClaudeAPIKey()
-    hasClaudeKey = false
-    status = "API key de Claude eliminada."
-   }
-  )
-
-  keyRow(
-   title: "ChatGPT (OpenAI)",
-   placeholder: "sk-…",
-   draft: $openAIDraft,
-   hasKey: hasOpenAIKey,
-   saveLabel: "Guardar ChatGPT",
-   onSave: {
-    try await advisor.saveOpenAIAPIKey(openAIDraft)
-    openAIDraft = ""
-    hasOpenAIKey = true
-    status = "API key de ChatGPT guardada en el llavero."
-   },
-   onClear: {
-    await advisor.clearOpenAIAPIKey()
-    hasOpenAIKey = false
-    status = "API key de ChatGPT eliminada."
-   }
-  )
-
-  if let status {
-   Text(status).font(.caption2).foregroundStyle(.secondary)
-  }
-  Text("Orden EQ: key Claude (llavero o ANTHROPIC_API_KEY) → key ChatGPT. Modelo: Haiku (barato).")
-   .font(.caption2)
-   .foregroundStyle(.secondary)
- }
- .opacity(enabled ? 1 : 0.55)
- .task {
-  hasClaudeKey = await advisor.hasClaudeAPIKey()
-  hasOpenAIKey = await advisor.hasOpenAIAPIKey()
- }
- }
-
- @ViewBuilder
- private func keyRow(
-  title: String,
-  placeholder: String,
-  draft: Binding<String>,
-  hasKey: Bool,
-  saveLabel: String,
-  onSave: @escaping () async throws -> Void,
-  onClear: @escaping () async -> Void
- ) -> some View {
-  VStack(alignment: .leading, spacing: 4) {
-   HStack {
-    Text(title).font(.caption.weight(.semibold))
-    Spacer()
-    Text(hasKey ? "En llavero" : "Sin key")
-     .font(.caption2)
-     .foregroundStyle(hasKey ? Color.secondary : Color.orange)
-   }
-   SecureField(placeholder, text: draft)
-    .textFieldStyle(.roundedBorder)
-    .disabled(busy)
-   HStack {
-    Button(busy ? "Guardando…" : saveLabel) {
-     Task {
-      busy = true
-      defer { busy = false }
-      do { try await onSave() }
-      catch { status = error.localizedDescription }
-     }
-    }
-    .disabled(busy || draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-    if hasKey {
-     Button("Borrar", role: .destructive) {
-      Task {
-       busy = true
-       defer { busy = false }
-       await onClear()
-      }
-     }
-     .disabled(busy)
-    }
-   }
-  }
  }
 }

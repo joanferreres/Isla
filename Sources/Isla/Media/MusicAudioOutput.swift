@@ -1,4 +1,5 @@
 import CoreAudio
+import IslandCore
 import SwiftUI
 
 /// Where Music / system audio is currently routed.
@@ -21,22 +22,6 @@ struct MusicAudioOutput: Equatable, Sendable {
         case .airPods: "AirPods"
         case .headphones: "Auriculares"
         case .bluetooth, .other: name.isEmpty ? "Salida" : name
-        }
-    }
-
-    /// Compact hint for the Claude / ChatGPT EQ prompt.
-    var promptHint: String {
-        switch kind {
-        case .builtInSpeakers:
-            "Built-in Mac speakers («\(name)»). Fuller bass for room fill is OK; avoid muddy mids."
-        case .airPods:
-            "Apple AirPods / earbuds («\(name)»). They already emphasize bass and can sound harsh on top — prefer clarity in mids, keep bass conservative (−2…+2 unless genre needs more), and avoid bright treble spikes."
-        case .headphones:
-            "Headphones («\(name)»). Prefer a balanced curve; light bass lift OK, keep treble controlled."
-        case .bluetooth:
-            "Bluetooth headphones / speaker («\(name)»). Prefer a balanced curve; avoid heavy bass that Bluetooth compression muddies."
-        case .other:
-            "Output device «\(name)». Prefer a balanced, subtle EQ."
         }
     }
 
@@ -86,22 +71,15 @@ struct MusicAudioOutput: Equatable, Sendable {
         return Self(kind: kind, name: name, uid: uid)
     }
 
-    /// Soft post-adjust so AirPods stay listenable even if the model over-boosts bass.
-    func adapted(_ advice: MusicClaudeEQService.Advice) -> MusicClaudeEQService.Advice {
-        var next = advice
+    /// How the playback device shifts the target curve (dB): AirPods and headphones already
+    /// emphasise bass and can be bright; small Mac speakers need a little more low end.
+    var eqBias: SpectrumBalance.Gains {
         switch kind {
-        case .airPods:
-            next.bass = Self.clamp(advice.bass - 2)
-            next.mid = Self.clamp(advice.mid + 1)
-            next.treble = Self.clamp(advice.treble - 1)
-        case .headphones, .bluetooth:
-            next.bass = Self.clamp(advice.bass - 1)
-        case .builtInSpeakers:
-            next.bass = Self.clamp(advice.bass + 1)
-        case .other:
-            break
+        case .airPods: .init(bass: -2, mid: 1, treble: -1)
+        case .headphones, .bluetooth: .init(bass: -1, mid: 0, treble: 0)
+        case .builtInSpeakers: .init(bass: 1, mid: 0, treble: 0)
+        case .other: .init(bass: 0, mid: 0, treble: 0)
         }
-        return next
     }
 
     private static func looksLikeAirPods(_ text: String) -> Bool {
@@ -132,7 +110,7 @@ struct MusicAudioOutput: Equatable, Sendable {
     }
 }
 
-/// Publishes the default output route so Claude EQ can re-tune on AirPods ↔ speakers.
+/// Publishes the default output route so the adaptive EQ can re-tune on AirPods ↔ speakers.
 @MainActor final class MusicAudioOutputMonitor: ObservableObject {
     /// Start inert — probing CoreAudio during SwiftUI StateObject init has crashed the HAL.
     @Published private(set) var output = MusicAudioOutput.unknown
