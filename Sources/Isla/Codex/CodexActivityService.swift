@@ -11,8 +11,10 @@ import IslandCore
  var tracker=CodexTurnTracker()
  let reader=CodexSessionReader()
  let claudeReader=ClaudeSessionReader()
+ let antigravityReader=AntigravitySessionReader()
  var watchesCodex=true
  var watchesClaude=false
+ var watchesAntigravity=false
  var timer:Timer?
  var refreshing=false
  var generation=0
@@ -33,11 +35,15 @@ import IslandCore
  }
  func connect() { guard !enabled else { return };enabled=true;generation += 1;timer=Timer.scheduledTimer(withTimeInterval:2,repeats:true) { [weak self] _ in Task { @MainActor in await self?.refresh() } };timer?.tolerance=0.4;Task { await refresh() } }
  func pauseForSleep() { enabled=false;generation += 1;timer?.invalidate();timer=nil }
- func disconnect() { enabled=false;generation += 1;timer?.invalidate();timer=nil;tracker=CodexTurnTracker();activeCount=0;latest=nil;Task { await reader.reset();await claudeReader.reset() } }
+ func disconnect() { enabled=false;generation += 1;timer?.invalidate();timer=nil;tracker=CodexTurnTracker();activeCount=0;latest=nil;Task { await reader.reset();await claudeReader.reset();await antigravityReader.reset() } }
  func refresh() async {
  guard enabled,!refreshing else { return };refreshing=true;defer { refreshing=false };let g=generation
  if watchesClaude {
  let finished=await claudeReader.scan();guard enabled,g == generation else { return }
+ for completion in finished { announce(completion) }
+ }
+ if watchesAntigravity {
+ let finished=await antigravityReader.scan();guard enabled,g == generation else { return }
  for completion in finished { announce(completion) }
  }
  guard watchesCodex else { return }
@@ -48,7 +54,7 @@ import IslandCore
  }
  func open(_ source:AlertSource) {
  let bundle:String
- switch source { case .codex:bundle="com.openai.codex";case .claude:bundle="com.anthropic.claudefordesktop";case .cursor:bundle="com.todesktop.230313mzl4w4u92" }
+ switch source { case .codex:bundle="com.openai.codex";case .claude:bundle="com.anthropic.claudefordesktop";case .cursor:bundle="com.todesktop.230313mzl4w4u92";case .antigravity:bundle="com.google.antigravity" }
  if let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:bundle) { NSWorkspace.shared.open(url) }
  }
  func openCodex() { if let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.openai.codex") { NSWorkspace.shared.open(url) } }

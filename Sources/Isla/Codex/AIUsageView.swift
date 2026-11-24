@@ -4,13 +4,13 @@ import IslandCore
  @ObservedObject var service:AIUsageService
  var size:CGFloat=32
  var body:some View {
- let fraction=service.enabled ? service.snapshot?.windows.first?.usedFraction : nil
+ let fraction=service.enabled ? service.primaryWindow?.usedFraction : nil
  ZStack {
  Circle().stroke(.white.opacity(0.10),lineWidth:3)
  if let fraction { Circle().trim(from:0,to:max(0,min(1,fraction))).stroke(service.isStale() ? Color.gray : .mint,style:StrokeStyle(lineWidth:3,lineCap:.round)).rotationEffect(.degrees(-90)) }
- if let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:service.provider == .cursor ? "com.todesktop.230313mzl4w4u92" : "com.anthropic.claudefordesktop") {
+ if let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:service.provider.bundleID) {
  Image(nsImage:NSWorkspace.shared.icon(forFile:url.path)).resizable().scaledToFit().frame(width:size*0.62,height:size*0.62).clipShape(RoundedRectangle(cornerRadius:4))
- } else { Image(systemName:service.provider == .cursor ? "cursorarrow" : "asterisk").font(.system(size:size*0.45,weight:.medium)).foregroundStyle(service.provider == .claude ? .orange : .white) }
+ } else { Image(systemName:service.provider == .cursor ? "cursorarrow" : service.provider == .antigravity ? "arrow.up.forward.circle" : "asterisk").font(.system(size:size*0.45,weight:.medium)).foregroundStyle(service.provider == .claude ? .orange : .white) }
  }.frame(width:size,height:size).accessibilityLabel("Consumo de \(service.provider.title)").accessibilityValue(fraction.map{"\(Int($0*100)) por ciento consumido"} ?? "Sin datos")
  }
 }
@@ -23,7 +23,7 @@ import IslandCore
  AIAccountRing(service:service)
  VStack(alignment:.leading,spacing:3) {
  Text(service.provider.title).font(.system(size:12,weight:.semibold))
- Text(service.snapshot?.windows.first.map{"\(Int($0.remainingPercent)) % libre"+(service.isStale() ? " · antiguo" : "")} ?? (service.loading ? "Consultando…" : "Sin datos")).font(.system(size:10)).foregroundStyle(.secondary).lineLimit(1)
+ Text(service.primaryWindow.map{"\(Int($0.remainingPercent)) % libre"+(service.provider == .antigravity ? " · " + $0.id.components(separatedBy:" (")[0] : "")+(service.isStale() ? " · antiguo" : "")} ?? (service.loading ? "Consultando…" : "Sin datos")).font(.system(size:10)).foregroundStyle(.secondary).lineLimit(1)
  }
  Spacer(minLength:0)
  }.frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
@@ -36,12 +36,14 @@ import IslandCore
  @ObservedObject var preferences:PreferencesStore
  @ObservedObject private var cursor=AIUsageAccounts.shared.cursor
  @ObservedObject private var claude=AIUsageAccounts.shared.claude
+ @ObservedObject private var antigravity=AIUsageAccounts.shared.antigravity
  let open:(String) -> Void
  var vertical=false
  var body:some View {
  let showCodex=preferences.value.showCodexOnHome && usage.notchReady
  let showCursor=preferences.value.showCursorOnHome && preferences.value.cursorEnabled && cursor.notchReady
  let showClaude=preferences.value.showClaudeOnHome && preferences.value.claudeEnabled && claude.notchReady
+ let showAntigravity=preferences.value.showAntigravityOnHome && preferences.value.antigravityEnabled && antigravity.notchReady
  let layout=vertical ? AnyLayout(VStackLayout(alignment:.leading,spacing:10)) : AnyLayout(HStackLayout(spacing:14))
  layout {
  if showCodex {
@@ -57,12 +59,14 @@ import IslandCore
  }
  if showCursor { AIHomeAccount(service:cursor,open:{ open("Cursor") }) }
  if showClaude { AIHomeAccount(service:claude,open:{ open("Claude") }) }
+ if showAntigravity { AIHomeAccount(service:antigravity,open:{ open("Antigravity") }) }
  }.frame(height:vertical ? nil : 38).clipped()
  }
- static func showsAny(preferences:Preferences,usage:CodexUsageService,cursor:AIUsageService,claude:AIUsageService) -> Bool {
+ static func showsAny(preferences:Preferences,usage:CodexUsageService,cursor:AIUsageService,claude:AIUsageService,antigravity:AIUsageService) -> Bool {
  (preferences.showCodexOnHome && usage.notchReady)
  || (preferences.showCursorOnHome && preferences.cursorEnabled && cursor.notchReady)
  || (preferences.showClaudeOnHome && preferences.claudeEnabled && claude.notchReady)
+ || (preferences.showAntigravityOnHome && preferences.antigravityEnabled && antigravity.notchReady)
  }
 }
 @MainActor struct AIUsageView:View {
@@ -71,6 +75,7 @@ import IslandCore
  @ObservedObject var statistics:StatisticsStore
  @ObservedObject private var cursor=AIUsageAccounts.shared.cursor
  @ObservedObject private var claude=AIUsageAccounts.shared.claude
+ @ObservedObject private var antigravity=AIUsageAccounts.shared.antigravity
  @Binding var selected:String
  var body:some View {
  let tabs=readyTabs
@@ -79,7 +84,7 @@ import IslandCore
  VStack(spacing:8) {
  Image(systemName:"sparkles").font(.largeTitle)
  Text("Ninguna cuenta de IA lista").font(.headline)
- Text("Conecta Codex, Cursor o Claude en Ajustes → IA.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+ Text("Conecta Codex, Cursor, Claude o Antigravity en Ajustes → IA.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
  }.frame(maxWidth:.infinity,maxHeight:.infinity)
  } else {
  Picker("Cuenta de IA",selection:$selected) {
@@ -90,6 +95,7 @@ import IslandCore
  if selected == "Codex" { CodexView(usage:usage,activity:activity,statistics:statistics) }
  else if selected == "Cursor" { AIAccountDetail(service:cursor) }
  else if selected == "Claude" { AIAccountDetail(service:claude) }
+ else if selected == "Antigravity" { AIAccountDetail(service:antigravity) }
  }
  }
  }
@@ -98,6 +104,7 @@ import IslandCore
  if usage.notchReady { tabs.append("Codex") }
  if cursor.notchReady { tabs.append("Cursor") }
  if claude.notchReady { tabs.append("Claude") }
+ if antigravity.notchReady { tabs.append("Antigravity") }
  return tabs
  }
 }
@@ -108,6 +115,7 @@ import IslandCore
  VStack(alignment:.leading,spacing:10) {
  HStack { AIAccountRing(service:service);Text(service.provider.title).font(.headline);Spacer();Button { Task { await service.refresh(interactive:true) } } label: { Image(systemName:"arrow.clockwise") }.buttonStyle(.plain).disabled(!service.enabled || service.loading).accessibilityLabel("Actualizar \(service.provider.title)") }
  if service.provider == .claude { Text("Límites de Claude Desktop y Claude Code con la misma cuenta").font(.caption).foregroundStyle(.secondary) }
+ if service.provider == .antigravity { Text("Cuota por modelo guardada por Antigravity; se actualiza cuando abres la app").font(.caption).foregroundStyle(.secondary) }
  if !service.enabled { Text("Conecta \(service.provider.title) en Ajustes → IA.").foregroundStyle(.secondary) }
  if service.loading { ProgressView().controlSize(.small) }
  if let snapshot=service.snapshot {
@@ -131,7 +139,7 @@ import IslandCore
  @Binding var showOnHome:Bool
  var body:some View {
  Section {
- HStack(spacing:12) { AIAccountRing(service:service,size:44);VStack(alignment:.leading,spacing:4) { Text(service.provider.title).font(.headline);Text(service.provider == .claude ? "Claude Desktop o Claude Code (mismos límites)" : "Usa tu sesión de la app de Cursor").font(.caption).foregroundStyle(.secondary) } }
+ HStack(spacing:12) { AIAccountRing(service:service,size:44);VStack(alignment:.leading,spacing:4) { Text(service.provider.title).font(.headline);Text(service.provider == .claude ? "Claude Desktop o Claude Code (mismos límites)" : service.provider == .antigravity ? "Lee la cuota que guarda la app Antigravity (solo local)" : "Usa tu sesión de la app de Cursor").font(.caption).foregroundStyle(.secondary) } }
  Toggle("Conectar \(service.provider.title)",isOn:$enabled)
  Toggle("Mostrar \(service.provider.title) en Inicio",isOn:$showOnHome).disabled(!service.notchReady)
  if let error=service.error { Text(error).font(.caption).foregroundStyle(.orange) }

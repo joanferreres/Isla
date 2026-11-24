@@ -63,10 +63,11 @@ import IslandCore
  @ObservedObject var activity:CodexActivityService
  @ObservedObject private var cursor=AIUsageAccounts.shared.cursor
  @ObservedObject private var claude=AIUsageAccounts.shared.claude
+ @ObservedObject private var antigravity=AIUsageAccounts.shared.antigravity
  let openCodex:(String) -> Void
  var body:some View {
  let playing=music.state.snapshot?.playing == true
- let showAI=AIHomeRow.showsAny(preferences:preferences.value,usage:usage,cursor:cursor,claude:claude)
+ let showAI=AIHomeRow.showsAny(preferences:preferences.value,usage:usage,cursor:cursor,claude:claude,antigravity:antigravity)
  VStack(spacing:8) {
  GeometryReader { space in
  HStack(alignment:.top,spacing:16) {

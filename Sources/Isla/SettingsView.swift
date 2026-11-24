@@ -155,12 +155,13 @@ enum SettingsPage:String,CaseIterable,Identifiable {
  } header: { Text("Codex") }
  AIAccountSettings(service:AIUsageAccounts.shared.cursor,enabled:$store.value.cursorEnabled,showOnHome:$store.value.showCursorOnHome)
  AIAccountSettings(service:AIUsageAccounts.shared.claude,enabled:$store.value.claudeEnabled,showOnHome:$store.value.showClaudeOnHome)
+ AIAccountSettings(service:AIUsageAccounts.shared.antigravity,enabled:$store.value.antigravityEnabled,showOnHome:$store.value.showAntigravityOnHome)
  Section {
  Picker("Modo de avisos",selection:$store.value.aiNotificationMode) {
  ForEach(AINotificationMode.allCases,id:\.self) { mode in Text(mode.title).tag(mode) }
  }
  Text("El botón junto a la chincheta alterna entre sonido y borde, solo borde o ningún aviso. La elección se guarda automáticamente.").font(.caption).foregroundStyle(.secondary)
- HStack { Text("Probar aviso");Spacer();ForEach(AlertSource.allCases,id:\.self) { source in Button(source.title) { activity.previewNotification(source:source) }.disabled(!store.value.aiVisualEnabled) } }
+ HStack { Text("Probar aviso");Spacer();ForEach(AlertSource.allCases,id:\.self) { source in Text(source.title).font(.body).padding(.horizontal,14).padding(.vertical,6).background(.quaternary,in:Capsule()).opacity(store.value.aiVisualEnabled ? 1 : 0.4).contentShape(Capsule()).onTapGesture { if store.value.aiVisualEnabled { activity.previewNotification(source:source) } }.accessibilityElement(children:.ignore).accessibilityLabel("Probar aviso de \(source.title)").accessibilityAddTraits(.isButton) } }
  Text("El borde de color resalta la isla al terminar y se desvanece: verde para Codex, naranja para Claude y blanco para Cursor. Sin avisos también oculta el mensaje de finalización.").font(.caption).foregroundStyle(.secondary)
  Text("Ocultar Codex de Inicio conserva sus avisos y estadísticas si sigue conectado.").font(.caption).foregroundStyle(.secondary)
  } header: { Label("Avisos",systemImage:"bell") }

@@ -2,27 +2,63 @@ import SwiftUI
 import IslandCore
 
 /// A short, event-driven contour highlight; no idle timer or display link.
+/// Every trigger builds a fresh `CompletionRailEffect` (new `.id`), so pressing it again while one is still
+/// playing restarts instantly instead of fighting with the animations in flight.
 @MainActor struct CompletionRailView:View {
  let trigger:UUID?
  let enabled:Bool
  let source:AlertSource
  let reduceMotion:Bool
  let cornerRadius:CGFloat
+ @State private var run=0
  @State private var visible=false
- @State private var opacity=0.0
- @State private var phase=0.0
- @State private var animationTask:Task<Void,Never>?
+ @State private var shownSource:AlertSource = .codex
+ @State private var hideTask:Task<Void,Never>?
  let notchWidth:CGFloat
  let notchHeight:CGFloat
  let physicalNotch:Bool
  var body:some View {
- let tint=Color(red:source.rgb.r,green:source.rgb.g,blue:source.rgb.b)
  GeometryReader { proxy in
  let frame=CompletionOutlineGeometry.frame(container:proxy.size,notchWidth:notchWidth,notchHeight:notchHeight,physicalNotch:physicalNotch)
- let contour=CompletionContour(physicalNotch:physicalNotch,cornerRadius:cornerRadius)
  ZStack {
  if visible && enabled {
- CompletionBacking(container:proxy.size,outlineFrame:frame,physicalNotch:physicalNotch,cornerRadius:cornerRadius).fill(.black,style:FillStyle(eoFill:true))
+ CompletionRailEffect(source:shownSource,container:proxy.size,frame:frame,cornerRadius:cornerRadius,physicalNotch:physicalNotch,reduceMotion:reduceMotion).id(run)
+ }
+ }.frame(width:frame.width,height:frame.height)
+ .position(x:frame.midX,y:frame.midY)
+ }.allowsHitTesting(false).accessibilityHidden(true)
+ .onChange(of:trigger) { _,pulse in if pulse != nil && enabled { play() } }
+ .onChange(of:enabled) { _,active in if !active { cancel() } }
+ .onDisappear { cancel() }
+ }
+ private func play() {
+ hideTask?.cancel()
+ shownSource=source
+ run += 1
+ visible=true
+ let mine=run
+ hideTask=Task { @MainActor in
+ do { try await Task.sleep(for:.seconds(3.9)) } catch { return }
+ if run == mine { visible=false;hideTask=nil }
+ }
+ }
+ private func cancel() { hideTask?.cancel();hideTask=nil;visible=false }
+}
+
+@MainActor private struct CompletionRailEffect:View {
+ let source:AlertSource
+ let container:CGSize
+ let frame:CGRect
+ let cornerRadius:CGFloat
+ let physicalNotch:Bool
+ let reduceMotion:Bool
+ @State private var opacity=0.0
+ @State private var phase=0.0
+ var body:some View {
+ let tint=Color(red:source.rgb.r,green:source.rgb.g,blue:source.rgb.b)
+ let contour=CompletionContour(physicalNotch:physicalNotch,cornerRadius:cornerRadius)
+ ZStack {
+ CompletionBacking(container:container,outlineFrame:frame,physicalNotch:physicalNotch,cornerRadius:cornerRadius).fill(.black,style:FillStyle(eoFill:true))
  // Soft halo, solid base line, then two bright sweeps on top.
  contour.stroke(tint.opacity(0.55),style:StrokeStyle(lineWidth:12,lineCap:.round)).blur(radius:7)
  contour.stroke(tint,style:StrokeStyle(lineWidth:6,lineCap:.round))
@@ -33,32 +69,15 @@ import IslandCore
  .mask(contour.stroke(style:StrokeStyle(lineWidth:6,lineCap:.round)))
  .shadow(color:tint,radius:8)
  .shadow(color:.white.opacity(0.6),radius:3)
- }
  }.frame(width:frame.width,height:frame.height)
- .position(x:frame.midX,y:frame.midY)
- }.opacity(opacity).allowsHitTesting(false).accessibilityHidden(true)
- .onChange(of:trigger) { _,pulse in if pulse != nil && enabled { play() } }
- .onChange(of:enabled) { _,active in if !active { cancel() } }
- .onDisappear { cancel() }
- }
- private func play() {
- animationTask?.cancel()
- var reset=Transaction();reset.disablesAnimations=true
- withTransaction(reset) { visible=true;opacity=0;phase=0 }
- animationTask=Task { @MainActor in
- // Let the fresh contour enter the hierarchy before animating its properties.
- await Task.yield();guard !Task.isCancelled else { return }
+ .opacity(opacity)
+ .task {
  withAnimation(.easeOut(duration:0.2)) { opacity=1 }
  if !reduceMotion { withAnimation(.linear(duration:3.0)) { phase=1 } }
  do { try await Task.sleep(for:.seconds(3.0)) } catch { return }
- guard !Task.isCancelled else { return }
  withAnimation(.easeOut(duration:0.7)) { opacity=0 }
- do { try await Task.sleep(for:.seconds(0.7)) } catch { return }
- guard !Task.isCancelled else { return }
- visible=false;animationTask=nil
  }
  }
- private func cancel() { animationTask?.cancel();animationTask=nil;visible=false;opacity=0 }
 }
 
 /// Open U below and beside the physical camera housing; no hidden top stroke.

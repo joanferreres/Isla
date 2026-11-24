@@ -59,8 +59,8 @@ import IslandCore
  self.activity.completionHighlightEnabled = value.aiVisualEnabled
  self.activity.completionNoticeEnabled = value.aiVisualEnabled
  if !value.aiVisualEnabled { self.activity.latest=nil }
- self.activity.watchesCodex=value.codexEnabled;self.activity.watchesClaude=value.claudeEnabled
- if old?.claudeEnabled != value.claudeEnabled || old?.codexEnabled != value.codexEnabled { if value.codexEnabled || value.claudeEnabled { self.activity.connect() } else { self.activity.disconnect() } }
+ self.activity.watchesCodex=value.codexEnabled;self.activity.watchesClaude=value.claudeEnabled;self.activity.watchesAntigravity=value.antigravityEnabled
+ if old?.claudeEnabled != value.claudeEnabled || old?.codexEnabled != value.codexEnabled || old?.antigravityEnabled != value.antigravityEnabled { if value.codexEnabled || value.claudeEnabled || value.antigravityEnabled { self.activity.connect() } else { self.activity.disconnect() } }
  if old?.codexEnabled != value.codexEnabled { if value.codexEnabled { self.usage.connect() } else { self.usage.disconnect() } }
  if old?.lidEffectEnabled != value.lidEffectEnabled { if value.lidEffectEnabled { Task { await self.lid.enable(requestPermission:old != nil) } } else { self.lid.disable() } }
  if old?.recordDesktopEnabled != value.recordDesktopEnabled {
@@ -76,7 +76,7 @@ import IslandCore
  guard let self else { return };let value=self.preferences.value
  self.updates.start()
  AIUsageAccounts.shared.resume(value)
- if value.musicEnabled { self.music.connect() };if value.codexEnabled || value.claudeEnabled { self.activity.connect() };if value.codexEnabled { self.usage.resume();self.usage.connect() };if value.lidEffectEnabled { Task { await self.lid.enable() } }
+ if value.musicEnabled { self.music.connect() };if value.codexEnabled || value.claudeEnabled || value.antigravityEnabled { self.activity.connect() };if value.codexEnabled { self.usage.resume();self.usage.connect() };if value.lidEffectEnabled { Task { await self.lid.enable() } }
  }.store(in:&integrationSubscriptions)
  installMainMenu()
  status = NSStatusBar.system.statusItem(withLength: 28)

@@ -294,6 +294,27 @@ actor AICredentialReader {
             : "No hay sesión de Claude. Pulsa «Permitir acceso a Claude» en Ajustes → IA, o inicia sesión en la app Claude / «claude auth login».")
     }
 
+    /// Antigravity's last cached quota per model. Local file only: no network, no keychain, no token is read.
+    func antigravityUsage(home: URL = FileManager.default.homeDirectoryForCurrentUser) throws -> UsageSnapshot {
+        let url = home.appendingPathComponent("Library/Application Support/Antigravity/User/globalStorage/state.vscdb")
+        guard FileManager.default.fileExists(atPath: url.path), let db = Self.openReadOnly(url) else {
+            throw MusicFailure(message: "Abre Antigravity e inicia sesión.")
+        }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT value FROM ItemTable WHERE key='antigravityAuthStatus'", -1, &statement, nil) == SQLITE_OK else {
+            throw MusicFailure(message: "No se pudo leer el estado de Antigravity.")
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW, let bytes = sqlite3_column_blob(statement, 0) else {
+            throw MusicFailure(message: "Abre Antigravity e inicia sesión.")
+        }
+        let value = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 0)))
+        let modified = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date) ?? Date()
+        do { return try AntigravityUsageDecoder.decodeAuthStatus(value, fetchedAt: modified) }
+        catch { throw MusicFailure(message: "Antigravity aún no ha guardado sus límites. Ábrelo y usa un modelo una vez.") }
+    }
+
     /// Opens another app's SQLite file without taking a lock on it. `immutable=1` lets us read while
     /// Cursor / Claude are running (they hold the database open), which used to fail intermittently.
     private static func openReadOnly(_ url: URL) -> OpaquePointer? {
@@ -572,6 +593,11 @@ actor AICredentialReader {
     @Published private(set) var accessRequested = false
     /// A connected account always stays in the notch; it shows "Sin datos" / stale values while limits can't be read.
     var notchReady: Bool { enabled }
+    /// Window shown in rings and on Home. Antigravity has one quota per model, so it shows the most consumed one.
+    var primaryWindow: UsageWindow? {
+        guard let windows = snapshot?.windows else { return nil }
+        return provider == .antigravity ? windows.max { $0.usedPercent < $1.usedPercent } : windows.first
+    }
     private let reader = AICredentialReader.shared
     private var timer: Timer?
     private var generation = 0
@@ -647,6 +673,17 @@ actor AICredentialReader {
             }
         }
         do {
+            if provider == .antigravity {
+                let local = try await reader.antigravityUsage()
+                guard enabled, g == generation, !Task.isCancelled else { return }
+                snapshot = local
+                if let saved = try? JSONEncoder().encode(local) {
+                    UserDefaults.standard.set(saved, forKey: "aiUsageSnapshot.\(provider.rawValue)")
+                }
+                error = nil
+                stale = false
+                return
+            }
             // Cursor may need one keychain prompt for «Cursor Safe Storage»; Claude may need «Claude Code-credentials».
             // First time ever (no cached key yet) ask once on our own, so the user does not have to find the button.
             let promptKey = "aiKeychainAutoPrompted.\(provider.rawValue)"
@@ -737,21 +774,25 @@ actor AICredentialReader {
     static let shared = AIUsageAccounts()
     let cursor = AIUsageService(.cursor)
     let claude = AIUsageService(.claude)
+    let antigravity = AIUsageService(.antigravity)
 
     func apply(_ value: Preferences) {
         if value.cursorEnabled { cursor.connect() } else { cursor.disconnect() }
         if value.claudeEnabled { claude.connect() } else { claude.disconnect() }
+        if value.antigravityEnabled { antigravity.connect() } else { antigravity.disconnect() }
     }
 
     func suspend() {
         cursor.pause()
         claude.pause()
+        antigravity.pause()
     }
 
     /// Resume accounts that stayed connected, then connect any that were enabled meanwhile.
     func resume(_ value: Preferences) {
         cursor.resume()
         claude.resume()
+        antigravity.resume()
         apply(value)
     }
 }

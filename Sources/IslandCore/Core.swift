@@ -43,6 +43,8 @@ public struct Preferences: Codable, Equatable {
  public var claudeEnabled = true
  public var showCursorOnHome = true
  public var showClaudeOnHome = true
+ public var antigravityEnabled = false
+ public var showAntigravityOnHome = true
  public var codexEnabled = false
  public var showCodexOnHome = true
  public var lidEffectEnabled = false
@@ -59,7 +61,7 @@ public struct Preferences: Codable, Equatable {
  public var screenshotClipboardEnabled=true
  public var selectedCalendarIDs: [String] = []
  public init() {}
- enum CodingKeys: String, CodingKey { case cursorEnabled,claudeEnabled,showCursorOnHome,showClaudeOnHome,screenshotsEnabled,screenshotClipboardEnabled,notificationMode,moonModeEnabled,showCodexOnHome,reduceMotion,expandedWidth,showOnAllDisplays,musicEnabled,musicSource,musicClaudeEQEnabled,calendarEnabled,filesEnabled,recordDesktopEnabled,codexEnabled,lidEffectEnabled,completionSoundEnabled,selectedCalendarIDs }
+ enum CodingKeys: String, CodingKey { case cursorEnabled,claudeEnabled,antigravityEnabled,showAntigravityOnHome,showCursorOnHome,showClaudeOnHome,screenshotsEnabled,screenshotClipboardEnabled,notificationMode,moonModeEnabled,showCodexOnHome,reduceMotion,expandedWidth,showOnAllDisplays,musicEnabled,musicSource,musicClaudeEQEnabled,calendarEnabled,filesEnabled,recordDesktopEnabled,codexEnabled,lidEffectEnabled,completionSoundEnabled,selectedCalendarIDs }
  public init(from decoder: Decoder) throws {
  let c = try decoder.container(keyedBy:CodingKeys.self)
  reduceMotion = try c.decodeIfPresent(Bool.self,forKey:.reduceMotion) ?? false
@@ -76,6 +78,8 @@ public struct Preferences: Codable, Equatable {
  claudeEnabled = try c.decodeIfPresent(Bool.self,forKey:.claudeEnabled) ?? true
  showCursorOnHome = try c.decodeIfPresent(Bool.self,forKey:.showCursorOnHome) ?? true
  showClaudeOnHome = try c.decodeIfPresent(Bool.self,forKey:.showClaudeOnHome) ?? true
+ antigravityEnabled = try c.decodeIfPresent(Bool.self,forKey:.antigravityEnabled) ?? false
+ showAntigravityOnHome = try c.decodeIfPresent(Bool.self,forKey:.showAntigravityOnHome) ?? true
  codexEnabled = try c.decodeIfPresent(Bool.self,forKey:.codexEnabled) ?? false
  lidEffectEnabled = try c.decodeIfPresent(Bool.self,forKey:.lidEffectEnabled) ?? false
  notificationMode = try c.decodeIfPresent(AINotificationMode.self,forKey:.notificationMode)

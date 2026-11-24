@@ -1,14 +1,17 @@
 import Foundation
 public enum AIProvider:String,CaseIterable,Codable,Sendable,Identifiable {
- case cursor,claude
+ case cursor,claude,antigravity
  public var id:String { rawValue }
- public var title:String { self == .cursor ? "Cursor" : "Claude" }
+ public var title:String { switch self { case .cursor:"Cursor";case .claude:"Claude";case .antigravity:"Antigravity" } }
+ /// Desktop app whose icon and local data back this provider.
+ public var bundleID:String { switch self { case .cursor:"com.todesktop.230313mzl4w4u92";case .claude:"com.anthropic.claudefordesktop";case .antigravity:"com.google.antigravity" } }
  public func label(_ id:String) -> String {
  switch id { case "five_hour":return "Sesión · 5 horas";case "seven_day":return "Semana · todos los modelos";case "seven_day_sonnet":return "Semana · Sonnet";case "seven_day_opus":return "Semana · Opus";case "auto":return "Cursor Models / Auto";case "api":return "Modelos API";case "included":return "Uso incluido";case "on_demand":return "Uso adicional";default:return id.replacingOccurrences(of:"_",with:" ") }
  }
 }
 public enum AIUsageDecoder {
  public static func decode(_ data:Data,provider:AIProvider,fetchedAt:Date) throws -> UsageSnapshot {
+ if provider == .antigravity { return try AntigravityUsageDecoder.decodeAuthStatus(data,fetchedAt:fetchedAt) }
  guard let root=try JSONSerialization.jsonObject(with:data) as? [String:Any] else { throw Failure() }
  func number(_ value:Any?) -> Double? {
   // The usage endpoints have returned both JSON numbers and numeric strings.

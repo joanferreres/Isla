@@ -52,7 +52,7 @@ Isla convierte el notch del Mac en un espacio compacto para música, calendario,
 ### Calendario, IA, archivos y tapa
 
 - Calendario del día, recordatorio previo al próximo evento.
-- Límites de Codex, Cursor y Claude en Inicio. Una cuenta conectada se mantiene visible; si la consulta falla muestra el último dato en gris.
+- Límites de Codex, Cursor, Claude y Antigravity (cuota por modelo, solo lectura local) en Inicio, con aviso azul al terminar un turno de Antigravity. Una cuenta conectada se mantiene visible; si la consulta falla muestra el último dato en gris.
 - Bandeja de archivos y AirDrop desde el notch.
 - Efecto opcional al cerrar la tapa (MacBook con sensor).
 
@@ -143,7 +143,7 @@ Sustitución manual: sal de Isla → descarga el ZIP → reemplaza la app en Apl
 
 ## Versión actual
 
-**Isla 0.8.83**.
+**Isla 0.8.84**.
 
 Artefactos de release esperados: `Isla.zip` + `SHA256SUMS.txt`. Firma: identidad personal `Isla Personal Code Signing` (Team ID vacío; **sin notarización**). Gatekeeper puede pedir «Abrir igualmente».
 
