@@ -94,8 +94,10 @@ enum SettingsPage:String,CaseIterable,Identifiable {
  Picker("Fuente",selection:$store.value.musicSource) {
   ForEach(MusicSourcePreference.allCases,id:\.self) { source in Text(source.title).tag(source) }
  }.disabled(!store.value.musicEnabled)
- Toggle("EQ con IA",isOn:$store.value.musicClaudeEQEnabled)
+ Toggle("EQ automático",isOn:$store.value.musicClaudeEQEnabled)
   .disabled(!store.value.musicEnabled)
+ Toggle("Usar IA (API key) en vez del análisis local",isOn:$store.value.musicEQUsesAI)
+  .disabled(!store.value.musicEnabled || !store.value.musicClaudeEQEnabled)
  Toggle("Calendario",isOn:$store.value.calendarEnabled)
  Toggle("Bandeja de archivos",isOn:$store.value.filesEnabled)
  Toggle("Tocadiscos en el escritorio",isOn:$store.value.recordDesktopEnabled)
@@ -105,8 +107,8 @@ enum SettingsPage:String,CaseIterable,Identifiable {
  Section {
  Text("Apple Music y Spotify comparten carátula, canción actual, progreso, volumen, controles, tocadiscos y widget. En Automática se usa la app que esté reproduciendo.").font(.caption).foregroundStyle(.secondary)
  if let error=music.error { Text(error).font(.caption).foregroundStyle(.orange) }
- Text("Los mandos del tocadiscos ajustan el ecualizador de la app activa. Para Spotify, autoriza Isla en Accesibilidad. El EQ con IA funciona en las dos. Las playlists y el cambiador de discos de Spotify necesitan conectar tu cuenta (más abajo).").font(.caption).foregroundStyle(.secondary)
- MusicAIEQKeySetup(enabled: store.value.musicClaudeEQEnabled && store.value.musicEnabled)
+ Text("Los mandos del tocadiscos ajustan el ecualizador de la app activa. Para Spotify, autoriza Isla en Accesibilidad. El EQ automático analiza el audio en tu Mac (sin coste) y se adapta a la salida: auriculares, AirPods o altavoces. Pide permiso de captura de audio la primera vez. Las playlists y el cambiador de discos de Spotify necesitan conectar tu cuenta (más abajo).").font(.caption).foregroundStyle(.secondary)
+ MusicAIEQKeySetup(enabled: store.value.musicClaudeEQEnabled && store.value.musicEnabled && store.value.musicEQUsesAI)
  SpotifySetupView()
  } header: { Label("Música e IA EQ",systemImage:"music.note") }
  Section {

@@ -33,6 +33,8 @@
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Isla muestra la carátula y permite controlar la reproducción de Apple Music y Spotify.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Isla analiza el balance de graves y agudos de la música que suena para ajustar el ecualizador. El audio se procesa en tu Mac y no se guarda.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Isla muestra tus eventos y próximos compromisos. No modifica el calendario.</string>
 	<key>NSHighResolutionCapable</key>

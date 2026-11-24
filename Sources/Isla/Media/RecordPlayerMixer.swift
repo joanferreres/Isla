@@ -57,7 +57,7 @@ struct RecordPlayerMixer: View {
                 volumeFader
             }
             .fixedSize(horizontal: false, vertical: true)
-            if supportsEQ,preferences.value.musicClaudeEQEnabled {
+            if preferences.value.musicClaudeEQEnabled {
                 Text(claudeStatus ?? "Estilo Claude — EQ según música y salida (\(audioOutput.output.shortLabel))")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -467,6 +467,11 @@ struct RecordPlayerMixer: View {
         let outputKey = "\(output.kind.rawValue)|\(output.uid)"
         if snapshot.trackID == lastClaudeTrackID, outputKey == lastClaudeOutputKey { return }
 
+        if !preferences.value.musicEQUsesAI {
+            await applyLocalEQ(snapshot: snapshot, output: output, outputKey: outputKey)
+            return
+        }
+
         let libraryGenre = snapshot.genre
         let libraryKey = MusicClaudeEQService.normalizeGenre(libraryGenre)
 
@@ -546,6 +551,41 @@ struct RecordPlayerMixer: View {
             guard !Task.isCancelled else { return }
             claudeStatus = error.localizedDescription
             lastClaudeTrackID = snapshot.trackID
+        }
+    }
+
+    /// Free, offline auto-EQ: measure the real audio, compare with a balanced target and
+    /// shift that target for the current output device (AirPods, headphones, speakers).
+    private func applyLocalEQ(snapshot: MediaSnapshot, output: MusicAudioOutput, outputKey: String) async {
+        let bundle = snapshot.source == .spotify ? "com.spotify.client" : "com.apple.Music"
+        claudeStatus = "Analizando el audio · \(output.shortLabel)…"
+        try? await Task.sleep(for: .milliseconds(900))
+        guard !Task.isCancelled, preferences.value.musicClaudeEQEnabled,
+              music.state.snapshot?.trackID == snapshot.trackID else { return }
+        do {
+            let result = try await ProcessAudioTap.measure(bundleID: bundle)
+            guard !Task.isCancelled, preferences.value.musicClaudeEQEnabled, active,
+                  music.state.snapshot?.trackID == snapshot.trackID else { return }
+            let neutral = MusicClaudeEQService.Advice(genre: "", preset: nil, bass: 0, mid: 0, treble: 0)
+            let bias = output.adapted(neutral)
+            let gains = SpectrumBalance.gains(
+                for: result,
+                currentGains: .init(bass: self.gains[.bass] ?? 0, mid: self.gains[.mid] ?? 0, treble: self.gains[.treble] ?? 0),
+                outputBias: .init(bass: bias.bass, mid: bias.mid, treble: bias.treble))
+            var advice = MusicClaudeEQService.Advice(
+                genre: "análisis local", preset: nil, bass: gains.bass, mid: gains.mid, treble: gains.treble)
+            advice.provider = "Local"
+            lastAppliedAdvice = advice
+            lastClaudeTrackID = snapshot.trackID
+            lastClaudeOutputKey = outputKey
+            applyClaudeAdvice(advice, outputLabel: output.shortLabel, reused: false)
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            claudeStatus = error.localizedDescription
+            lastClaudeTrackID = snapshot.trackID
+            lastClaudeOutputKey = outputKey
         }
     }
 

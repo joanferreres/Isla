@@ -11,10 +11,14 @@ actor SpotifyEqualizer {
         }) else { throw MusicFailure(message: "Abre Spotify para ajustar el sonido.") }
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.3)
-        guard let window = (attribute(app, kAXWindowsAttribute) as? [AXUIElement])?.first else {
-            throw MusicFailure(message: "Abre la ventana de Spotify.")
+        // Settings may live in the main window or in its own window, so always search them all.
+        func search() -> (AXUIElement, [AXUIElement])? {
+            for window in (attribute(app, kAXWindowsAttribute) as? [AXUIElement]) ?? [] {
+                if let found = findControls(window) { return found }
+            }
+            return nil
         }
-        var controls = findControls(window)
+        var controls = search()
         if controls == nil,
            let value = attribute(app, kAXMenuBarAttribute), CFGetTypeID(value) == AXUIElementGetTypeID(),
            let menu = children(value as! AXUIElement).first(where: { label($0) == "Spotify" }),
@@ -22,9 +26,9 @@ actor SpotifyEqualizer {
                (attribute($0, "AXMenuItemCmdChar") as? String) == ","
            }) {
             if AXUIElementPerformAction(settings, kAXPressAction as CFString) == .success {
-                for _ in 0..<10 {
+                for _ in 0..<30 {
                     try await Task.sleep(for: .milliseconds(100))
-                    controls = findControls(window)
+                    controls = search()
                     if controls != nil { break }
                 }
             }
