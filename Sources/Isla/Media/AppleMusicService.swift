@@ -108,8 +108,9 @@ import IslandCore
     }
 
     func displayPosition(at date: Date) -> Double {
-        guard let snapshot = state.snapshot else { return 0 }
-        return min(snapshot.duration, max(0, snapshot.position + (snapshot.playing ? max(0, date.timeIntervalSince(receivedAt)) : 0)))
+        guard let snapshot = state.snapshot, snapshot.position.isFinite else { return 0 }
+        let position = max(0, snapshot.position + (snapshot.playing ? max(0, date.timeIntervalSince(receivedAt)) : 0))
+        return snapshot.duration.isFinite && snapshot.duration > 0 ? min(snapshot.duration, position) : position
     }
 
     func pauseForSleep() {

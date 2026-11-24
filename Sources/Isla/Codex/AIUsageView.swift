@@ -7,7 +7,7 @@ import IslandCore
  let fraction=service.enabled ? service.snapshot?.windows.first?.usedFraction : nil
  ZStack {
  Circle().stroke(.white.opacity(0.10),lineWidth:3)
- if let fraction { Circle().trim(from:0,to:fraction).stroke(service.stale ? Color.gray : .mint,style:StrokeStyle(lineWidth:3,lineCap:.round)).rotationEffect(.degrees(-90)) }
+ if let fraction { Circle().trim(from:0,to:max(0,min(1,fraction))).stroke(service.isStale() ? Color.gray : .mint,style:StrokeStyle(lineWidth:3,lineCap:.round)).rotationEffect(.degrees(-90)) }
  if let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:service.provider == .cursor ? "com.todesktop.230313mzl4w4u92" : "com.anthropic.claudefordesktop") {
  Image(nsImage:NSWorkspace.shared.icon(forFile:url.path)).resizable().scaledToFit().frame(width:size*0.62,height:size*0.62).clipShape(RoundedRectangle(cornerRadius:4))
  } else { Image(systemName:service.provider == .cursor ? "cursorarrow" : "asterisk").font(.system(size:size*0.45,weight:.medium)).foregroundStyle(service.provider == .claude ? .orange : .white) }
@@ -23,7 +23,7 @@ import IslandCore
  AIAccountRing(service:service)
  VStack(alignment:.leading,spacing:3) {
  Text(service.provider.title).font(.system(size:12,weight:.semibold))
- Text(service.snapshot?.windows.first.map{"\(Int($0.remainingPercent)) % libre"+(service.stale ? " · antiguo" : "")} ?? (service.loading ? "Consultando…" : "Sin datos")).font(.system(size:10)).foregroundStyle(.secondary).lineLimit(1)
+ Text(service.snapshot?.windows.first.map{"\(Int($0.remainingPercent)) % libre"+(service.isStale() ? " · antiguo" : "")} ?? (service.loading ? "Consultando…" : "Sin datos")).font(.system(size:10)).foregroundStyle(.secondary).lineLimit(1)
  }
  Spacer(minLength:0)
  }.frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
@@ -79,7 +79,7 @@ import IslandCore
  VStack(spacing:8) {
  Image(systemName:"sparkles").font(.largeTitle)
  Text("Ninguna cuenta de IA lista").font(.headline)
- Text("Conecta Codex, Cursor o Claude en Ajustes → IA. Solo aparecen en el notch cuando la consulta de límites funciona.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+ Text("Conecta Codex, Cursor o Claude en Ajustes → IA.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
  }.frame(maxWidth:.infinity,maxHeight:.infinity)
  } else {
  Picker("Cuenta de IA",selection:$selected) {
@@ -114,11 +114,11 @@ import IslandCore
  ForEach(snapshot.windows) { window in
  VStack(alignment:.leading,spacing:4) {
  HStack { Text(service.provider.label(window.id));Spacer();Text("\(Int(window.remainingPercent)) % restante").monospacedDigit() }
- ProgressView(value:window.usedFraction).tint(service.stale ? .gray : .mint)
+ ProgressView(value:max(0,min(1,window.usedFraction))).tint(service.isStale() ? .gray : .mint)
  if let reset=window.resetsAt { Text("Reinicio: \(reset.formatted(date:.abbreviated,time:.shortened))").font(.caption2).foregroundStyle(.secondary) }
  }
  }
- Text("\(service.stale ? "Dato antiguo · " : "")Actualizado \(snapshot.fetchedAt.formatted(date:.omitted,time:.shortened))").font(.caption2).foregroundStyle(.secondary)
+ Text("\(service.isStale() ? "Dato antiguo · " : "")Actualizado \(snapshot.fetchedAt.formatted(date:.omitted,time:.shortened))").font(.caption2).foregroundStyle(.secondary)
  }
  if let error=service.error { Text(error).font(.caption).foregroundStyle(.orange) }
  }.font(.system(size:12)).frame(maxWidth:.infinity,alignment:.leading)
@@ -134,9 +134,6 @@ import IslandCore
  HStack(spacing:12) { AIAccountRing(service:service,size:44);VStack(alignment:.leading,spacing:4) { Text(service.provider.title).font(.headline);Text(service.provider == .claude ? "Claude Desktop o Claude Code (mismos límites)" : "Usa tu sesión de la app de Cursor").font(.caption).foregroundStyle(.secondary) } }
  Toggle("Conectar \(service.provider.title)",isOn:$enabled)
  Toggle("Mostrar \(service.provider.title) en Inicio",isOn:$showOnHome).disabled(!service.notchReady)
- if !service.notchReady,enabled {
- Text("No se muestra en el notch hasta que la consulta de límites funcione (pulsa Actualizar).").font(.caption).foregroundStyle(.secondary)
- }
  if let error=service.error { Text(error).font(.caption).foregroundStyle(.orange) }
  if enabled {
  if service.provider == .claude {

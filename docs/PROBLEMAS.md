@@ -43,7 +43,7 @@ Necesitas **Accesibilidad** para Isla. Ve a **Privacidad y seguridad → Accesib
 ## El EQ con IA no aplica estilo
 
 1. Activa **EQ con IA** en Ajustes → Módulos → Música, o elige estilo **Claude** en el tocadiscos.
-2. Guarda una API key de Claude o ChatGPT en esos campos (llavero), o inicia sesión con `claude auth login` y acepta el diálogo del llavero.
+2. Guarda una API key de Claude (sk-ant-…) o ChatGPT en esos campos (llavero), o define `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` en tu shell de login. La sesión de Claude Code (`claude auth login`) ya no sirve para el EQ.
 3. Comprueba también Automatización → Music y Accesibilidad (el EQ final sigue pasando por Música).
 
 ## No veo eventos

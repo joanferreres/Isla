@@ -25,9 +25,9 @@ import IslandCore
  Button { calendar.select(day:date) } label: {
  VStack(spacing:3) {
  Text(date,format:.dateTime.weekday(.narrow)).font(.system(size:9,weight:selected ? .bold : .medium)).foregroundStyle(selected ? .white : .gray)
- Text(date,format:.dateTime.day()).font(.system(size:selected ? 20 : 13,weight:selected ? .bold : .semibold)).foregroundStyle(selected || today ? .blue : .gray)
- Circle().fill(events.isEmpty ? Color.clear : selected ? .blue : color(events[0])).frame(width:3,height:3)
- }.frame(width:23,height:42)
+ Text(date,format:.dateTime.day()).font(.system(size:selected ? 18 : 13,weight:selected ? .bold : .semibold)).lineLimit(1).fixedSize().foregroundStyle(today ? .blue : selected ? .white : .gray)
+ Circle().fill(events.isEmpty ? Color.clear : today ? .blue : color(events[0])).frame(width:3,height:3)
+ }.frame(width:selected ? 30 : 23,height:42)
  }.buttonStyle(.plain).id(date).accessibilityLabel(date.formatted(date:.complete,time:.omitted))
  }
  }

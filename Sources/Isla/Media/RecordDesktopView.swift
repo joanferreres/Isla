@@ -29,7 +29,8 @@ struct RecordDesktopView: View {
                 control("Ocultar del escritorio", symbol: "xmark", action: close)
             }
             TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !spinning)) { context in
-                let phase = spinning ? music.displayPosition(at: context.date).truncatingRemainder(dividingBy: 3.6) * 100 : 0
+                // Angle follows the song position: it stays put when paused instead of snapping to 0°.
+                let phase = (music.displayPosition(at: context.date) * RecordPlayerView.degreesPerSecond).truncatingRemainder(dividingBy: 360)
                 VinylRecord(artwork: artwork, palette: palette, rotation: phase)
                     .frame(width: 91, height: 91)
                     .accessibilityHidden(true)

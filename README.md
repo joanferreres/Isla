@@ -47,7 +47,7 @@ Isla convierte el notch del Mac en un espacio compacto para música, calendario,
 - En **Ajustes → Módulos → Funciones**: música con fuente automática / Apple Music / Spotify, **EQ con IA**, Calendario, bandeja de archivos, tocadiscos en el escritorio y efecto de tapa.
 - En el tocadiscos, el menú de estilo incluye **Claude** (respeta el interruptor de EQ con IA).
 - El EQ con IA detecta la salida (AirPods, auriculares o altavoces del Mac) y adapta la curva al cambiar de dispositivo.
-- API keys de **Claude** y **ChatGPT** en el llavero (orden: OAuth Claude Code → key Claude → key ChatGPT, o `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
+- API keys de **Claude** y **ChatGPT** en el llavero (orden: key Claude → key ChatGPT; también `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`). El EQ no usa la sesión OAuth de Claude Code.
 
 ### Calendario, IA, archivos y tapa
 
@@ -72,7 +72,7 @@ Concede solo lo que uses. Ruta base: **Ajustes del Sistema → Privacidad y segu
 | **Accesibilidad** | Privacidad y seguridad → Accesibilidad → activa **Isla** | Mandos Graves/Medios/Agudos, cambio de presets en la ventana EQ de Música, y añadir canciones del catálogo a playlists. |
 | **Calendarios** | Privacidad y seguridad → Calendarios | Eventos del día y recordatorio previo. Isla solo lee. |
 | **Grabación de pantalla** | Privacidad y seguridad → Grabación de pantalla y de sistema | Solo el efecto visual al cerrar la tapa. No guarda vídeo. |
-| **Llavero** | Diálogo de macOS al conectar Claude/Cursor o al guardar API keys | Leer sesión de Claude Desktop («Claude Safe Storage») u OAuth de Claude Code / Cursor Safe Storage; guardar keys de Claude y ChatGPT para el EQ con IA. |
+| **Llavero** | Diálogo de macOS al conectar Claude/Cursor o al guardar API keys | Leer (solo para mostrar límites de uso) la sesión de Claude Desktop («Claude Safe Storage»), el OAuth de Claude Code o Cursor Safe Storage; guardar keys de Claude y ChatGPT para el EQ con IA. |
 | **Archivos / capturas** (opcional) | Al activar capturas en Ajustes | Guardar en `Escritorio/capturas` y copiar al portapapeles. |
 
 ### Pasos claros (checklist)

@@ -10,7 +10,12 @@ public enum AIProvider:String,CaseIterable,Codable,Sendable,Identifiable {
 public enum AIUsageDecoder {
  public static func decode(_ data:Data,provider:AIProvider,fetchedAt:Date) throws -> UsageSnapshot {
  guard let root=try JSONSerialization.jsonObject(with:data) as? [String:Any] else { throw Failure() }
- func number(_ value:Any?) -> Double? { guard let n=value as? NSNumber,n.doubleValue.isFinite else { return nil };return n.doubleValue }
+ func number(_ value:Any?) -> Double? {
+  // The usage endpoints have returned both JSON numbers and numeric strings.
+  if let n=value as? NSNumber,n.doubleValue.isFinite { return n.doubleValue }
+  if let s=value as? String,let n=Double(s),n.isFinite { return n }
+  return nil
+ }
  func date(_ value:Any?) -> Date? {
  guard let s=value as? String else { return nil };let f=ISO8601DateFormatter();f.formatOptions=[.withInternetDateTime,.withFractionalSeconds];return f.date(from:s) ?? ISO8601DateFormatter().date(from:s)
  }
@@ -31,6 +36,18 @@ public enum AIUsageDecoder {
  }
  guard !windows.isEmpty else { throw Failure() }
  return UsageSnapshot(fetchedAt:fetchedAt,windows:windows,creditRemaining:nil,creditUnit:nil)
+ }
+ /// Claude Desktop's `plan-usage-history.json`: latest sample with `fh` / `sd` percentages.
+ public static func decodeClaudeDesktopHistory(_ data:Data) throws -> UsageSnapshot {
+ guard let root=try JSONSerialization.jsonObject(with:data) as? [String:Any],let samples=root["samples"] as? [[String:Any]] else { throw Failure() }
+ for sample in samples.reversed() {
+ guard let u=sample["u"] as? [String:Any],let t=(sample["t"] as? NSNumber)?.doubleValue else { continue }
+ var windows:[UsageWindow]=[]
+ if let fh=(u["fh"] as? NSNumber)?.doubleValue,fh>=0 { windows.append(UsageWindow(id:"five_hour",usedPercent:fh,resetsAt:nil)) }
+ if let sd=(u["sd"] as? NSNumber)?.doubleValue,sd>=0 { windows.append(UsageWindow(id:"seven_day",usedPercent:sd,resetsAt:nil)) }
+ if !windows.isEmpty { return UsageSnapshot(fetchedAt:Date(timeIntervalSince1970:t/1000),windows:windows,creditRemaining:nil,creditUnit:nil) }
+ }
+ throw Failure()
  }
  public struct Failure:LocalizedError { public var errorDescription:String? { "La cuenta no proporciona límites medibles. No se estima un porcentaje." } }
 }

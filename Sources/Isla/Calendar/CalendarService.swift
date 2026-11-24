@@ -42,7 +42,7 @@ actor CalendarReader {
  var nextEvent:CalendarEvent? { surroundingEvents.filter{!$0.allDay && $0.start >= Date()}.min{$0.start < $1.start} }
  func events(on day:Date) -> [CalendarEvent] { CalendarDay.events(on:day,from:surroundingEvents,calendar:.current) }
  @Published var calendars:[CalendarChoice]=[]
- @Published var selectedDate=Date()
+ @Published var selectedDate=Calendar.current.startOfDay(for:Date())
  private var lastObservedDay=Calendar.current.startOfDay(for:Date())
  @Published var error:String?
  @Published var enabled=false
@@ -54,7 +54,24 @@ actor CalendarReader {
  let preferences:PreferencesStore
  var observers:[NSObjectProtocol]=[]
  var generation=0
- init(preferences:PreferencesStore) { self.preferences=preferences }
+ private var dayObservers:[NSObjectProtocol]=[]
+ init(preferences:PreferencesStore) {
+ self.preferences=preferences
+ // Keep "today" correct even when the calendar module is off or the Mac slept through midnight.
+ let sync:(Notification) -> Void={ [weak self] _ in Task { @MainActor in self?.syncToday() } }
+ dayObservers=[
+ NotificationCenter.default.addObserver(forName:.NSCalendarDayChanged,object:nil,queue:.main,using:sync),
+ NotificationCenter.default.addObserver(forName:NSApplication.didBecomeActiveNotification,object:nil,queue:.main,using:sync),
+ NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.didWakeNotification,object:nil,queue:.main,using:sync),
+ ]
+ }
+ /// When the real day changes, jump the strip to the new today.
+ func syncToday() {
+ let today=Calendar.current.startOfDay(for:Date())
+ guard today != lastObservedDay else { return }
+ lastObservedDay=today;selectedDate=today
+ if enabled { refresh() }
+ }
  func connect() {
  guard !enabled else { refresh();return }; enabled=true;generation += 1
  observers.append(NotificationCenter.default.addObserver(forName:.EKEventStoreChanged,object:nil,queue:.main) { [weak self] _ in Task { @MainActor in self?.refresh() } })

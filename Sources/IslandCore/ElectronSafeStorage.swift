@@ -19,12 +19,16 @@ public enum ElectronSafeStorage {
 
  /// Chromium cookie values (Claude Desktop, etc.): `v10` + AES-CBC, often with a 32-byte host hash prefix.
  public static func chromeCookieValue(_ blob:Data,password:String) throws -> String {
-  let plain=try decryptBytes(blob,password:password)
-  // Chrome 127+ prefixes a SHA-256 host key; prefer the suffix when it is clean UTF-8.
-  if plain.count>32,let text=String(data:plain.dropFirst(32),encoding:.utf8),!text.isEmpty,!text.contains("\0") {
-   return text
-  }
-  guard let text=String(data:plain,encoding:.utf8),!text.isEmpty,!text.contains("\0") else { throw Failure() }
+  try cookieText(decryptBytes(blob,password:password))
+ }
+
+ /// Newer Chromium prefixes the value with a 32-byte SHA-256 of the host (binary bytes).
+ /// Cookie values themselves are printable ASCII, so: whole value printable → no prefix;
+ /// otherwise drop the 32-byte hash. (Before, a valid unprefixed session was cut by 32 characters.)
+ public static func cookieText(_ plain:Data) throws -> String {
+  func printable(_ bytes:Data) -> Bool { !bytes.isEmpty && bytes.allSatisfy { $0 >= 0x20 && $0 < 0x7f } }
+  let value=printable(plain) ? plain : plain.count>32 ? Data(plain.dropFirst(32)) : Data()
+  guard printable(value),let text=String(data:value,encoding:.ascii) else { throw Failure() }
   return text
  }
 

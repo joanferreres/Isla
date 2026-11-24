@@ -30,7 +30,7 @@ Concede solo lo que uses. Ruta base: **Ajustes del Sistema → Privacidad y segu
 | **Accesibilidad** | Privacidad y seguridad → **Accesibilidad** → activa **Isla** | Mandos Graves/Medios/Agudos, cambio de presets en la ventana EQ de Música y añadir canciones del catálogo a playlists. |
 | **Calendarios** | Privacidad y seguridad → **Calendarios** → permite a Isla | Eventos del día y recordatorio previo. Isla solo lee. |
 | **Grabación de pantalla** | Privacidad y seguridad → **Grabación de pantalla y de sistema** | Solo el efecto visual al cerrar la tapa. No guarda vídeo. |
-| **Llavero** | Acepta el diálogo de macOS cuando Isla o Claude/Cursor lo pidan | Leer sesión OAuth de Claude Code / Cursor Safe Storage; guardar API keys de Claude y ChatGPT para el EQ con IA. |
+| **Llavero** | Acepta el diálogo de macOS cuando Isla o Claude/Cursor lo pidan | Leer (solo para mostrar límites de uso) la sesión OAuth de Claude Code / Cursor Safe Storage; guardar API keys de Claude y ChatGPT para el EQ con IA. |
 | **Archivos / capturas** (opcional) | Al activar capturas en Ajustes de Isla | Guardar en `Escritorio/capturas` y copiar al portapapeles. |
 
 ### Orden recomendado
@@ -52,7 +52,7 @@ Abre Isla desde su icono de la barra de menús y entra en **Ajustes**. En la isl
 | --- | --- |
 | Funciones | En **Ajustes → Módulos → Funciones**: música con fuente Apple Music / Spotify / Automática, **EQ con IA**, Calendario, bandeja de archivos, tocadiscos en el escritorio y efecto de tapa. |
 | Música | Activa Música. Concede **Automatización → Music** o **Spotify** según la fuente. |
-| EQ con IA | Interruptor **EQ con IA** en Funciones; keys de Claude/ChatGPT en **Música e IA EQ** (llavero). También con el estilo **Claude** del tocadiscos. Orden: OAuth Claude Code → key Claude → key ChatGPT. |
+| EQ con IA | Interruptor **EQ con IA** en Funciones; keys de Claude/ChatGPT en **Música e IA EQ** (llavero). También con el estilo **Claude** del tocadiscos. Orden: key Claude → key ChatGPT (el EQ no usa la sesión de Claude Code). |
 | Tocadiscos | Pulsa el disco junto a la luna. El botón verde lo abre a pantalla completa. Sobre el vinilo, arrastra o desliza dos dedos a la izquierda para avanzar y a la derecha para retroceder. Mantén pulsado ⌘ para ver los diez ambientes. El fader vertical ajusta el volumen de Música. Si la salida Bluetooth publica su batería, el porcentaje aparece junto a ⌘. Gira los mandos para ajustar el ecualizador o pulsa la flecha circular sobre ellos para volver a sonido plano. La primera vez, activa Isla en **Accesibilidad** y vuelve a girar el mando. |
 | Archivos | Arrastra archivos de Finder al notch para abrir la bandeja. Suelta en la bandeja para guardar un acceso al original, o en AirDrop para elegir un destinatario. Arrastra un archivo desde la bandeja para usarlo en otra app. |
 | Añadir a playlist | En **Inicio**, pulsa el icono de lista con un signo + al lado de los controles de la canción. También está en el tocadiscos junto a ⌘. Elige una playlist editable de Música. Para algunas canciones del catálogo, Isla usa la ventana principal de Música y el permiso de **Accesibilidad**. |

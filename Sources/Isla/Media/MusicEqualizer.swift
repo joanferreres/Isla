@@ -197,39 +197,75 @@ actor MusicEqualizer {
     }
 
     private func applyManual(generation: Int) async throws -> [MixerBand: Double] {
-        try writeManualBands(from: desired)
+        // Pre-write only when Music is not already on Manual, so switching to it never
+        // plays the old Manual curve for a moment. While turning knobs on Manual, one write is enough.
+        if latchedPreset?.caseInsensitiveCompare(manualPreset) != .orderedSame {
+            try writeManualBands(from: desired)
+        }
         try await armPlayback(preset: manualPreset, rewriteManual: true, generation: generation)
         return desired
     }
 
     /// One path: open EQ UI → On checkbox lit → preset selected → optional Manual rewrite.
+    /// The first attempt works on the parked (off-screen) EQ window and never steals focus, so turning
+    /// a knob does not pull Music to the front. Only if Music does not respond do we bring it forward,
+    /// show the EQ window and retry once, then give focus back to whatever app had it.
     private func armPlayback(preset: String, rewriteManual: Bool, generation: Int) async throws {
         guard AXIsProcessTrusted() else { throw Failure.access }
         try check(generation)
+        do {
+            try await armPlaybackOnce(preset: preset, rewriteManual: rewriteManual, generation: generation, foreground: false)
+            return
+        } catch let failure as Failure where [.closed, .unresponsive, .preset, .silent].contains(failure) {
+            try check(generation)
+        }
+        let previous = NSWorkspace.shared.frontmostApplication?.processIdentifier
         NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Music")
             .first?
             .activate()
         unparkEqualizerWindows()
+        do {
+            try await armPlaybackOnce(preset: preset, rewriteManual: rewriteManual, generation: generation, foreground: true)
+        } catch {
+            parkEqualizerWindows()
+            restoreFocus(previous)
+            throw error
+        }
+        parkEqualizerWindows()
+        restoreFocus(previous)
+    }
+
+    private func restoreFocus(_ pid: pid_t?) {
+        guard let pid, let app = NSRunningApplication(processIdentifier: pid),
+              app.bundleIdentifier != "com.apple.Music" else { return }
+        app.activate()
+    }
+
+    private func armPlaybackOnce(preset: String, rewriteManual: Bool, generation: Int, foreground: Bool) async throws {
         var controls = try await openControls()
         try check(generation)
-        try turnOn(controls.toggle)
+        try await turnOn(controls.toggle)
         try check(generation)
         controls = try findControls()
-        if popupTitle(controls.popup)?.caseInsensitiveCompare(preset) != .orderedSame {
+        let switched = popupTitle(controls.popup)?.caseInsensitiveCompare(preset) != .orderedSame
+        if switched {
             try await selectPreset(preset, popup: controls.popup)
             try check(generation)
             controls = try findControls()
-            try turnOn(controls.toggle)
+            try await turnOn(controls.toggle)
         }
         if rewriteManual {
             try writeManualBands(from: desired)
-            try await Task.sleep(for: .milliseconds(60))
-            try check(generation)
-            try writeManualBands(from: desired)
+            if switched {
+                // Selecting Manual reloads its stored bands; write again so the new curve sticks.
+                try await Task.sleep(for: .milliseconds(60))
+                try check(generation)
+                try writeManualBands(from: desired)
+            }
         }
         guard isArmed(preset: preset) else { throw Failure.silent }
         latchedPreset = preset
-        parkEqualizerWindows()
+        if !foreground { parkEqualizerWindows() }
     }
 
     /// Ground truth for audible EQ on this Music build: the On checkbox, not AS `EQ enabled`.
@@ -247,17 +283,17 @@ actor MusicEqualizer {
         return false
     }
 
-    private func turnOn(_ toggle: AXUIElement) throws {
+    private func turnOn(_ toggle: AXUIElement) async throws {
         if number(toggle, kAXValueAttribute) == 1 { return }
         guard AXUIElementPerformAction(toggle, kAXPressAction as CFString) == .success else {
             throw Failure.unresponsive
         }
-        usleep(80_000)
+        try await Task.sleep(for: .milliseconds(80))
         if let live = try? findControls(), number(live.toggle, kAXValueAttribute) == 1 { return }
         // Desync: press again after re-resolve.
         if let live = try? findControls() {
             _ = AXUIElementPerformAction(live.toggle, kAXPressAction as CFString)
-            usleep(80_000)
+            try await Task.sleep(for: .milliseconds(80))
             if let again = try? findControls(), number(again.toggle, kAXValueAttribute) == 1 { return }
         }
         throw Failure.silent

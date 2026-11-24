@@ -105,6 +105,9 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  private var pendingResize:DispatchWorkItem?
  private var externalDragPoll:Timer?
  private var dragPasteboardChange=0
+ // Drag pasteboard change count while no drag was in progress. The pasteboard keeps the last dragged files forever,
+ // so only a count different from this one means a real new drag (not a click with a little jitter).
+ private lazy var idleDragChange=NSPasteboard(name:.drag).changeCount
  private var dragMotionObserved=false
  private var mediaPlaying=false
  private let openSettings:() -> Void
@@ -234,7 +237,7 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
 
  private func beginExternalDragTracking() {
  guard externalDragPoll == nil else { return }
- dragPasteboardChange=NSPasteboard(name:.drag).changeCount
+ dragPasteboardChange=idleDragChange
  let timer=Timer(timeInterval:1.0/30,repeats:true) { [weak self] _ in
   Task { @MainActor [weak self] in
    guard let self else { return }
@@ -242,7 +245,7 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
     self.stopExternalDragTracking();return
    }
    let pasteboard=NSPasteboard(name:.drag)
-   guard (self.dragMotionObserved || pasteboard.changeCount != self.dragPasteboardChange),
+   guard pasteboard.changeCount != self.dragPasteboardChange,
          pasteboard.availableType(from:[.fileURL]) != nil else { return }
    if self.panel.level != Self.fileDragLevel {
     self.panel.level=Self.fileDragLevel;self.panel.ignoresMouseEvents=false
@@ -266,6 +269,7 @@ final class IslandHostingView<Content:View>:NSHostingView<Content> {
  private func stopExternalDragTracking() {
  externalDragPoll?.invalidate();externalDragPoll=nil
  dragMotionObserved=false
+ idleDragChange=NSPasteboard(name:.drag).changeCount
  if panel.level != Self.restingLevel { panel.level=Self.restingLevel;panel.orderFrontRegardless() }
  if model.fileDropTarget == nil { updatePointer() }
  DispatchQueue.main.asyncAfter(deadline:.now()+0.15) { [weak self] in

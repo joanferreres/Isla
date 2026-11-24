@@ -4,384 +4,684 @@ import SQLite3
 import Security
 import LocalAuthentication
 
-/// Auth for Anthropic Messages / usage: Claude Code OAuth, or an Isla-stored / env API key.
-enum ClaudeAPIAuth:Sendable {
- case oauth(token:String)
- case apiKey(String)
-}
-
 actor AICredentialReader {
- private var cachedClaude:Data?
- private var cachedUntil=Date.distantPast
- private var cachedCursorToken:String?
- private var cachedCursorSealed:String?
- private let savedService="local.personal.isla.claude-session"
- private let apiKeyService="local.personal.isla.anthropic-api-key"
- private let openAIKeyService="local.personal.isla.openai-api-key"
- private func silentKeychain(_ query:[CFString:Any]) -> (OSStatus,CFTypeRef?) {
-  var allowed:DarwinBoolean=true;SecKeychainGetUserInteractionAllowed(&allowed);SecKeychainSetUserInteractionAllowed(false)
-  defer { SecKeychainSetUserInteractionAllowed(allowed.boolValue) }
-  var result:CFTypeRef?;let status=SecItemCopyMatching(query as CFDictionary,&result);return (status,result)
- }
- private func savedSession() -> Data? {
-  let (_,result)=silentKeychain([kSecClass:kSecClassGenericPassword,kSecAttrService:savedService,kSecAttrAccount:"session",kSecReturnData:true,kSecMatchLimit:kSecMatchLimitOne])
-  guard let data=result as? Data,let row=try? JSONSerialization.jsonObject(with:data) as? [String:Any],let oauth=row["claudeAiOauth"] as? [String:Any],let expiry=oauth["expiresAt"] as? NSNumber,expiry.doubleValue/1000>Date().timeIntervalSince1970 else { return nil };return data
- }
- private func saveSession(token:String,expiry:Date) {
-  guard let data=try? JSONSerialization.data(withJSONObject:["claudeAiOauth":["accessToken":token,"expiresAt":expiry.timeIntervalSince1970*1000]]) else { return }
-  let query:[CFString:Any]=[kSecClass:kSecClassGenericPassword,kSecAttrService:savedService,kSecAttrAccount:"session"]
-  var allowed:DarwinBoolean=true;SecKeychainGetUserInteractionAllowed(&allowed);SecKeychainSetUserInteractionAllowed(false)
-  defer { SecKeychainSetUserInteractionAllowed(allowed.boolValue) }
-  if SecItemUpdate(query as CFDictionary,[kSecValueData:data] as CFDictionary) == errSecItemNotFound {
-   var add=query;add[kSecValueData]=data;SecItemAdd(add as CFDictionary,nil)
-  }
- }
- func forgetClaude() {
-  cachedClaude=nil;cachedUntil = .distantPast
-  var allowed:DarwinBoolean=true;SecKeychainGetUserInteractionAllowed(&allowed);SecKeychainSetUserInteractionAllowed(false)
-  defer { SecKeychainSetUserInteractionAllowed(allowed.boolValue) }
-  SecItemDelete([kSecClass:kSecClassGenericPassword,kSecAttrService:savedService,kSecAttrAccount:"session"] as CFDictionary)
- }
- private func keychainPassword(service:String,account:String,interactive:Bool) throws -> String {
-  let base:[CFString:Any]=[kSecClass:kSecClassGenericPassword,kSecAttrService:service,kSecAttrAccount:account,kSecReturnData:true,kSecMatchLimit:kSecMatchLimitOne]
-  let (silentStatus,silentResult)=silentKeychain(base)
-  if silentStatus == errSecSuccess,let data=silentResult as? Data,let password=String(data:data,encoding:.utf8),!password.isEmpty { return password }
-  guard interactive else {
-   throw MusicFailure(message:service.hasPrefix("Cursor") ? "Permite a Isla usar «Cursor Safe Storage» del llavero (Ajustes → IA → Actualizar Cursor)." : "Permite el acceso al llavero para leer la sesión.")
-  }
-  var wasAllowed:DarwinBoolean=true
-  SecKeychainGetUserInteractionAllowed(&wasAllowed)
-  SecKeychainSetUserInteractionAllowed(true)
-  defer { SecKeychainSetUserInteractionAllowed(wasAllowed.boolValue) }
-  var result:CFTypeRef?
-  let status=SecItemCopyMatching(base as CFDictionary,&result)
-  guard status == errSecSuccess,let data=result as? Data,let password=String(data:data,encoding:.utf8),!password.isEmpty else {
-   throw MusicFailure(message:status == errSecUserCanceled ? "Se canceló el acceso al llavero." : "No se pudo leer «\(service)» del llavero.")
-  }
-  return password
- }
- private func unwrapCursorToken(_ sealed:String,interactive:Bool,password:String?) throws -> String {
-  guard sealed.hasPrefix(ElectronSafeStorage.cursorPrefix) else { return sealed }
-  if sealed == cachedCursorSealed,let cachedCursorToken { return cachedCursorToken }
-  let secret=try password ?? keychainPassword(service:"Cursor Safe Storage",account:"Cursor Key",interactive:interactive)
-  let token=try ElectronSafeStorage.unwrap(sealed,password:secret)
-  cachedCursorSealed=sealed
-  cachedCursorToken=token
-  return token
- }
- private func jwtSubject(_ token:String) -> String? {
-  let parts=token.split(separator:".")
-  guard parts.count>1 else { return nil }
-  var payload=String(parts[1]).replacingOccurrences(of:"-",with:"+").replacingOccurrences(of:"_",with:"/")
-  payload += String(repeating:"=",count:(4-payload.count%4)%4)
-  guard let data=Data(base64Encoded:payload),let row=try? JSONSerialization.jsonObject(with:data) as? [String:Any] else { return nil }
-  return row["sub"] as? String
- }
- private func claudeOAuthPayload(_ data:Data) -> (token:String,expiry:Date,empty:Bool)? {
-  guard let row=try? JSONSerialization.jsonObject(with:data) as? [String:Any],let oauth=row["claudeAiOauth"] as? [String:Any] else { return nil }
-  let token=oauth["accessToken"] as? String ?? ""
-  let expiry=(oauth["expiresAt"] as? NSNumber).map{Date(timeIntervalSince1970:$0.doubleValue/1000)} ?? Date().addingTimeInterval(300)
-  return (token,expiry,token.isEmpty)
- }
- func request(_ provider:AIProvider,interactive:Bool,home:URL=FileManager.default.homeDirectoryForCurrentUser,cursorSafePassword:String?=nil) throws -> URLRequest {
-  if provider == .cursor {
-   let url=home.appendingPathComponent("Library/Application Support/Cursor/User/globalStorage/state.vscdb")
-   var db:OpaquePointer?
-   guard sqlite3_open_v2(url.path,&db,SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX,nil) == SQLITE_OK else { if db != nil { sqlite3_close(db) };throw MusicFailure(message:"Inicia sesión en la app de Cursor.") }
-   defer { sqlite3_close(db) }
-   sqlite3_busy_timeout(db,1000)
-   func value(_ key:String) -> String? {
-    var statement:OpaquePointer?
-    guard sqlite3_prepare_v2(db,"SELECT value FROM ItemTable WHERE key=?",-1,&statement,nil) == SQLITE_OK else { return nil }
-    defer { sqlite3_finalize(statement) }
-    sqlite3_bind_text(statement,1,key,-1,unsafeBitCast(-1,to:sqlite3_destructor_type.self))
-    guard sqlite3_step(statement) == SQLITE_ROW,let text=sqlite3_column_text(statement,0) else { return nil }
-    return String(cString:text)
-   }
-   guard let sealed=value("cursorAuth/accessToken"),!sealed.isEmpty else { throw MusicFailure(message:"Inicia sesión en la app de Cursor.") }
-   let token:String
-   do { token=try unwrapCursorToken(sealed,interactive:interactive,password:cursorSafePassword) }
-   catch let failure as MusicFailure { throw failure }
-   catch { throw MusicFailure(message:"Cursor cifró la sesión y no se pudo leer. Abre Cursor, confirma el inicio de sesión y pulsa Actualizar en Isla.") }
-   var account=value("cursorAuth/stripeMembershipAuthId")
-   if account?.isEmpty != false { account=jwtSubject(token) }
-   guard let account,!account.isEmpty else { throw MusicFailure(message:"Vuelve a iniciar sesión en Cursor.") }
-   var request=URLRequest(url:URL(string:"https://cursor.com/api/usage-summary")!)
-   request.setValue("WorkosCursorSessionToken=\(account)::\(token)",forHTTPHeaderField:"Cookie")
-   return request
-  }
-  let directory=ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"].map{URL(fileURLWithPath:$0)} ?? home.appendingPathComponent(".claude")
-  var data=try? Data(contentsOf:directory.appendingPathComponent(".credentials.json"))
-  if data == nil,Date()<cachedUntil { data=cachedClaude }
-  if data == nil,home == FileManager.default.homeDirectoryForCurrentUser { data=savedSession() }
-  if data == nil {
-   // Legacy login-keychain items ignore LAContext. Disable interaction at the process level too.
-   var wasAllowed:DarwinBoolean=true
-   SecKeychainGetUserInteractionAllowed(&wasAllowed)
-   SecKeychainSetUserInteractionAllowed(interactive)
-   defer { SecKeychainSetUserInteractionAllowed(wasAllowed.boolValue) }
-   // Enumerate metadata first, then read the newest item. Background refresh never opens a permission dialog.
-   let context=LAContext();context.interactionNotAllowed=true
-   let query:[CFString:Any]=[kSecClass:kSecClassGenericPassword,kSecAttrService:"Claude Code-credentials",kSecReturnAttributes:true,kSecReturnPersistentRef:true,kSecMatchLimit:kSecMatchLimitAll,kSecUseAuthenticationContext:context]
-   var result:CFTypeRef?
-   if SecItemCopyMatching(query as CFDictionary,&result) == errSecSuccess,let rows=result as? [[String:Any]],let newest=rows.sorted(by:{($0[kSecAttrModificationDate as String] as? Date ?? .distantPast)>($1[kSecAttrModificationDate as String] as? Date ?? .distantPast)}).first,let ref=newest[kSecValuePersistentRef as String] {
-    context.interactionNotAllowed = !interactive
-    let read:[CFString:Any]=[kSecClass:kSecClassGenericPassword,kSecValuePersistentRef:ref,kSecReturnData:true,kSecMatchLimit:kSecMatchLimitOne,kSecUseAuthenticationContext:context]
-    var secret:CFTypeRef?
-    if SecItemCopyMatching(read as CFDictionary,&secret) == errSecSuccess { data=secret as? Data }
-   }
-  }
-  if let data,let oauth=claudeOAuthPayload(data),!oauth.empty,oauth.expiry>Date() {
-   cachedClaude=data;cachedUntil=oauth.expiry
-   if home == FileManager.default.homeDirectoryForCurrentUser { saveSession(token:oauth.token,expiry:oauth.expiry) }
-   var request=URLRequest(url:URL(string:"https://api.anthropic.com/api/oauth/usage")!)
-   request.setValue("Bearer \(oauth.token)",forHTTPHeaderField:"Authorization")
-   request.setValue("oauth-2025-04-20",forHTTPHeaderField:"anthropic-beta")
-   return request
-  }
-  let expiredOAuth:Bool={
-   guard let data,let oauth=claudeOAuthPayload(data),!oauth.empty else { return false }
-   return oauth.expiry<=Date()
-  }()
-  // Empty/expired Claude Code-credentials (common when Claude Code uses ANTHROPIC_API_KEY only).
-  if data != nil { forgetClaude() }
-  // Claude Desktop session cookie → organization usage (no Claude Code OAuth needed).
-  if let desktop=try? claudeDesktopUsageRequest(interactive:interactive,home:home) { return desktop }
-  if expiredOAuth {
-   throw MusicFailure(message:"La sesión OAuth de Claude Code ha caducado. Abre Claude Code o ejecuta «claude auth login», o inicia sesión en la app Claude.")
-  }
-  if anthropicAPIKey() != nil {
-   throw MusicFailure(message:"Claude Code está con API key (sin OAuth) y no hay sesión usable de la app Claude. El EQ funciona; para límites en Isla: «claude auth login» o inicia sesión en Claude Desktop.")
-  }
-  throw MusicFailure(message:interactive
-   ? "No hay sesión de Claude. Ejecuta «claude auth login», inicia sesión en la app Claude (permitir «Claude Safe Storage»), o pega una key sk-ant- en Ajustes → Música."
-   : "No hay sesión de Claude. Pulsa «Permitir acceso a Claude» en Ajustes → IA, o inicia sesión en la app Claude / «claude auth login».")
- }
+    /// One instance for all usage services: keychain interaction flags are process-global, so reads must be serialized.
+    static let shared = AICredentialReader()
+    private var cachedClaude: Data?
+    private var cachedUntil = Date.distantPast
+    private var cachedCursorToken: String?
+    private var cachedCursorSealed: String?
+    private let savedService = "local.personal.isla.claude-session"
+    private let apiKeyService = "local.personal.isla.anthropic-api-key"
+    private let openAIKeyService = "local.personal.isla.openai-api-key"
+    /// OAuth bearer the usage endpoint answered 401/403 for. Skipped until Claude Code writes a new one.
+    private var rejectedClaudeToken: String?
 
- /// Reads Claude Desktop's encrypted `sessionKey` cookie and asks claude.ai for usage.
- private func claudeDesktopUsageRequest(interactive:Bool,home:URL) throws -> URLRequest {
-  let cookies=home.appendingPathComponent("Library/Application Support/Claude/Cookies")
-  var db:OpaquePointer?
-  guard sqlite3_open_v2(cookies.path,&db,SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX,nil) == SQLITE_OK else {
-   if db != nil { sqlite3_close(db) }
-   throw MusicFailure(message:"Abre la app Claude e inicia sesión.")
-  }
-  defer { sqlite3_close(db) }
-  sqlite3_busy_timeout(db,1000)
-  func encrypted(_ name:String) -> Data? {
-   var statement:OpaquePointer?
-   guard sqlite3_prepare_v2(db,"SELECT encrypted_value FROM cookies WHERE name=? AND host_key IN ('.claude.ai','claude.ai') ORDER BY LENGTH(encrypted_value) DESC LIMIT 1",-1,&statement,nil) == SQLITE_OK else { return nil }
-   defer { sqlite3_finalize(statement) }
-   sqlite3_bind_text(statement,1,name,-1,unsafeBitCast(-1,to:sqlite3_destructor_type.self))
-   guard sqlite3_step(statement) == SQLITE_ROW,let bytes=sqlite3_column_blob(statement,0) else { return nil }
-   return Data(bytes:bytes,count:Int(sqlite3_column_bytes(statement,0)))
-  }
-  guard let sessionBlob=encrypted("sessionKey") else { throw MusicFailure(message:"Inicia sesión en la app Claude.") }
-  let password=try keychainPassword(service:"Claude Safe Storage",account:"Claude Key",interactive:interactive)
-  let session=try ElectronSafeStorage.chromeCookieValue(sessionBlob,password:password)
-  let organization:String
-  if let orgBlob=encrypted("lastActiveOrg"),let org=try? ElectronSafeStorage.chromeCookieValue(orgBlob,password:password),!org.isEmpty {
-   organization=org
-  } else {
-   let history=home.appendingPathComponent("Library/Application Support/Claude/plan-usage-history.json")
-   guard let data=try? Data(contentsOf:history),let row=try? JSONSerialization.jsonObject(with:data) as? [String:Any],let samples=row["samples"] as? [[String:Any]],let org=samples.last?["org"] as? String,!org.isEmpty else {
-    throw MusicFailure(message:"Abre Claude Desktop y consulta Uso una vez para fijar la organización.")
-   }
-   organization=org
-  }
-  var request=URLRequest(url:URL(string:"https://claude.ai/api/organizations/\(organization)/usage")!)
-  request.setValue("sessionKey=\(session)",forHTTPHeaderField:"Cookie")
-  request.setValue("Mozilla/5.0",forHTTPHeaderField:"User-Agent")
-  return request
- }
+    private func silentKeychain(_ query: [CFString: Any]) -> (OSStatus, CFTypeRef?) {
+        var allowed: DarwinBoolean = true
+        SecKeychainGetUserInteractionAllowed(&allowed)
+        SecKeychainSetUserInteractionAllowed(false)
+        defer { SecKeychainSetUserInteractionAllowed(allowed.boolValue) }
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        return (status, result)
+    }
 
- /// Credential for calling Anthropic Messages (auto-EQ, etc.).
- /// Order: Isla keychain API key → Claude Code OAuth → process env / login-shell `ANTHROPIC_API_KEY`.
- /// A key the user just pasted must win over a flaky/expired OAuth token (TLS / connection-lost on Messages).
- func claudeAPIAuth(interactive:Bool=false,home:URL=FileManager.default.homeDirectoryForCurrentUser) throws -> ClaudeAPIAuth {
-  if let key=storedSecret(service:apiKeyService),!key.isEmpty {
-   return .apiKey(key)
-  }
-  if let oauth=try? claudeOAuthToken(interactive:interactive,home:home) {
-   return .oauth(token:oauth)
-  }
-  if let key=anthropicAPIKey() { return .apiKey(key) }
-  throw MusicFailure(message:"""
-  Auto-EQ con Claude necesita autenticación.
-  1) Pega una API key de Anthropic (sk-ant-…) en Ajustes → Música → EQ con IA.
-  2) O «claude auth login» (Claude Code) y permitir el llavero en Isla → IA → Claude.
-  3) O define ANTHROPIC_API_KEY en tu shell de login (~/.zshrc); Isla la importa al llavero.
-  """)
- }
+    private func savedSession() -> Data? {
+        let (_, result) = silentKeychain([
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: savedService,
+            kSecAttrAccount: "session",
+            kSecReturnData: true,
+            kSecMatchLimit: kSecMatchLimitOne,
+        ])
+        guard let data = result as? Data,
+              let row = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let oauth = row["claudeAiOauth"] as? [String: Any],
+              let expiry = oauth["expiresAt"] as? NSNumber,
+              expiry.doubleValue / 1000 > Date().timeIntervalSince1970
+        else { return nil }
+        return data
+    }
 
- /// Any Anthropic API key Isla can use (keychain, env, or login shell).
- func anthropicAPIKey() -> String? {
-  if let key=storedSecret(service:apiKeyService),!key.isEmpty { return key }
-  if let key=ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]?
-   .trimmingCharacters(in:.whitespacesAndNewlines),!key.isEmpty {
-   try? storeSecret(key,service:apiKeyService)
-   return key
-  }
-  if let key=loginShellAnthropicAPIKey() {
-   try? storeSecret(key,service:apiKeyService)
-   return key
-  }
-  return nil
- }
+    private func saveSession(token: String, expiry: Date) {
+        guard let data = try? JSONSerialization.data(withJSONObject: [
+            "claudeAiOauth": ["accessToken": token, "expiresAt": expiry.timeIntervalSince1970 * 1000],
+        ]) else { return }
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: savedService,
+            kSecAttrAccount: "session",
+        ]
+        var allowed: DarwinBoolean = true
+        SecKeychainGetUserInteractionAllowed(&allowed)
+        SecKeychainSetUserInteractionAllowed(false)
+        defer { SecKeychainSetUserInteractionAllowed(allowed.boolValue) }
+        if SecItemUpdate(query as CFDictionary, [kSecValueData: data] as CFDictionary) == errSecItemNotFound {
+            var add = query
+            add[kSecValueData] = data
+            SecItemAdd(add as CFDictionary, nil)
+        }
+    }
 
- /// GUI apps don't inherit ~/.zshrc — read ANTHROPIC_API_KEY from a login shell once.
- private func loginShellAnthropicAPIKey() -> String? {
-  let shell=ProcessInfo.processInfo.environment["SHELL"].flatMap{ $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
-  let process=Process()
-  process.executableURL=URL(fileURLWithPath:shell)
-  process.arguments=["-l","-c","printenv ANTHROPIC_API_KEY"]
-  let pipe=Pipe();process.standardOutput=pipe;process.standardError=FileHandle.nullDevice
-  do { try process.run() } catch { return nil }
-  let data=pipe.fileHandleForReading.readDataToEndOfFile()
-  process.waitUntilExit()
-  guard process.terminationStatus == 0,
-        let key=String(data:data,encoding:.utf8)?
-   .trimmingCharacters(in:.whitespacesAndNewlines),
-        key.hasPrefix("sk-ant-"),key.count>20 else { return nil }
-  return key
- }
+    func forgetClaude() {
+        cachedClaude = nil
+        cachedUntil = .distantPast
+        var allowed: DarwinBoolean = true
+        SecKeychainGetUserInteractionAllowed(&allowed)
+        SecKeychainSetUserInteractionAllowed(false)
+        defer { SecKeychainSetUserInteractionAllowed(allowed.boolValue) }
+        SecItemDelete([
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: savedService,
+            kSecAttrAccount: "session",
+        ] as CFDictionary)
+    }
 
- /// OpenAI / ChatGPT API key for music AI EQ fallback.
- func openAIAPIKey() throws -> String {
-  if let key=storedSecret(service:openAIKeyService),!key.isEmpty { return key }
-  if let key=ProcessInfo.processInfo.environment["OPENAI_API_KEY"]?
-   .trimmingCharacters(in:.whitespacesAndNewlines),!key.isEmpty {
-   return key
-  }
-  throw MusicFailure(message:"Falta la API key de ChatGPT. Pégala en Ajustes → Música → EQ con IA, o exporta OPENAI_API_KEY.")
- }
+    private func keychainPassword(service: String, account: String, interactive: Bool) throws -> String {
+        let base: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+            kSecReturnData: true,
+            kSecMatchLimit: kSecMatchLimitOne,
+        ]
+        let (silentStatus, silentResult) = silentKeychain(base)
+        if silentStatus == errSecSuccess,
+           let data = silentResult as? Data,
+           let password = String(data: data, encoding: .utf8),
+           !password.isEmpty {
+            return password
+        }
+        guard interactive else {
+            throw MusicFailure(message: service.hasPrefix("Cursor")
+                ? "Permite a Isla usar «Cursor Safe Storage» del llavero (Ajustes → IA → Actualizar Cursor)."
+                : "Permite el acceso al llavero para leer la sesión.")
+        }
+        var wasAllowed: DarwinBoolean = true
+        SecKeychainGetUserInteractionAllowed(&wasAllowed)
+        SecKeychainSetUserInteractionAllowed(true)
+        defer { SecKeychainSetUserInteractionAllowed(wasAllowed.boolValue) }
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(base as CFDictionary, &result)
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let password = String(data: data, encoding: .utf8),
+              !password.isEmpty
+        else {
+            throw MusicFailure(message: status == errSecUserCanceled
+                ? "Se canceló el acceso al llavero."
+                : "No se pudo leer «\(service)» del llavero.")
+        }
+        return password
+    }
 
- func hasStoredAnthropicAPIKey() -> Bool { storedSecret(service:apiKeyService)?.isEmpty == false }
- func hasStoredOpenAIAPIKey() -> Bool { storedSecret(service:openAIKeyService)?.isEmpty == false }
+    private func unwrapCursorToken(_ sealed: String, interactive: Bool, password: String?) throws -> String {
+        guard sealed.hasPrefix(ElectronSafeStorage.cursorPrefix) else { return sealed }
+        if sealed == cachedCursorSealed, let cachedCursorToken { return cachedCursorToken }
+        let secret = try password ?? keychainPassword(service: "Cursor Safe Storage", account: "Cursor Key", interactive: interactive)
+        let token = try ElectronSafeStorage.unwrap(sealed, password: secret)
+        cachedCursorSealed = sealed
+        cachedCursorToken = token
+        return token
+    }
 
- func saveAnthropicAPIKey(_ key:String) throws {
-  let trimmed=key.trimmingCharacters(in:.whitespacesAndNewlines)
-  guard trimmed.hasPrefix("sk-ant-"),trimmed.count>20 else {
-   throw MusicFailure(message:"La API key de Anthropic debe empezar por sk-ant-.")
-  }
-  try storeSecret(trimmed,service:apiKeyService)
- }
+    private func jwtSubject(_ token: String) -> String? {
+        let parts = token.split(separator: ".")
+        guard parts.count > 1 else { return nil }
+        var payload = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
+        guard let data = Data(base64Encoded: payload),
+              let row = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return row["sub"] as? String
+    }
 
- func saveOpenAIAPIKey(_ key:String) throws {
-  let trimmed=key.trimmingCharacters(in:.whitespacesAndNewlines)
-  guard trimmed.hasPrefix("sk-"),!trimmed.hasPrefix("sk-ant-"),trimmed.count>20 else {
-   throw MusicFailure(message:"La API key de OpenAI/ChatGPT debe empezar por sk- (no sk-ant-).")
-  }
-  try storeSecret(trimmed,service:openAIKeyService)
- }
+    private func claudeOAuthPayload(_ data: Data) -> (token: String, expiry: Date, empty: Bool)? {
+        guard let row = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let oauth = row["claudeAiOauth"] as? [String: Any]
+        else { return nil }
+        let token = oauth["accessToken"] as? String ?? ""
+        let expiry = (oauth["expiresAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) } ?? Date().addingTimeInterval(300)
+        return (token, expiry, token.isEmpty)
+    }
 
- func clearAnthropicAPIKey() { clearSecret(service:apiKeyService) }
- func clearOpenAIAPIKey() { clearSecret(service:openAIKeyService) }
+    func request(
+        _ provider: AIProvider,
+        interactive: Bool,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        cursorSafePassword: String? = nil
+    ) throws -> URLRequest {
+        if provider == .cursor {
+            let url = home.appendingPathComponent("Library/Application Support/Cursor/User/globalStorage/state.vscdb")
+            guard FileManager.default.fileExists(atPath: url.path), let db = Self.openReadOnly(url) else {
+                throw MusicFailure(message: "Inicia sesión en la app de Cursor.")
+            }
+            defer { sqlite3_close(db) }
+            sqlite3_busy_timeout(db, 1000)
+            func value(_ key: String) -> String? {
+                var statement: OpaquePointer?
+                guard sqlite3_prepare_v2(db, "SELECT value FROM ItemTable WHERE key=?", -1, &statement, nil) == SQLITE_OK else { return nil }
+                defer { sqlite3_finalize(statement) }
+                sqlite3_bind_text(statement, 1, key, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+                guard sqlite3_step(statement) == SQLITE_ROW, let text = sqlite3_column_text(statement, 0) else { return nil }
+                return String(cString: text)
+            }
+            guard let sealed = value("cursorAuth/accessToken"), !sealed.isEmpty else {
+                throw MusicFailure(message: "Inicia sesión en la app de Cursor.")
+            }
+            let token: String
+            do {
+                token = try unwrapCursorToken(sealed, interactive: interactive, password: cursorSafePassword)
+            } catch let failure as MusicFailure {
+                throw failure
+            } catch {
+                throw MusicFailure(message: "Cursor cifró la sesión y no se pudo leer. Abre Cursor, confirma el inicio de sesión y pulsa Actualizar en Isla.")
+            }
+            var account = value("cursorAuth/stripeMembershipAuthId")
+            if account?.isEmpty != false { account = jwtSubject(token) }
+            guard let account, !account.isEmpty else {
+                throw MusicFailure(message: "Vuelve a iniciar sesión en Cursor.")
+            }
+            var request = URLRequest(url: URL(string: "https://cursor.com/api/usage-summary")!)
+            request.setValue("WorkosCursorSessionToken=\(account)::\(token)", forHTTPHeaderField: "Cookie")
+            return request
+        }
 
- private func storeSecret(_ value:String,service:String) throws {
-  let query:[CFString:Any]=[kSecClass:kSecClassGenericPassword,kSecAttrService:service,kSecAttrAccount:"api-key"]
-  var allowed:DarwinBoolean=true;SecKeychainGetUserInteractionAllowed(&allowed);SecKeychainSetUserInteractionAllowed(false)
-  defer { SecKeychainSetUserInteractionAllowed(allowed.boolValue) }
-  let data=Data(value.utf8)
-  if SecItemUpdate(query as CFDictionary,[kSecValueData:data] as CFDictionary) == errSecItemNotFound {
-   var add=query;add[kSecValueData]=data;add[kSecAttrAccessible]=kSecAttrAccessibleAfterFirstUnlock
-   let status=SecItemAdd(add as CFDictionary,nil)
-   guard status == errSecSuccess || status == errSecDuplicateItem else {
-    throw MusicFailure(message:"No se pudo guardar la API key en el llavero.")
-   }
-  }
- }
+        // Try every source in order and keep the first *live* token. A stale ~/.claude/.credentials.json
+        // (left over from an old login) must not hide a valid token in the keychain.
+        let directory = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"].map { URL(fileURLWithPath: $0) } ?? home.appendingPathComponent(".claude")
+        let isUserHome = home == FileManager.default.homeDirectoryForCurrentUser
+        var seen: Data?
+        var data: Data?
+        func consider(_ candidate: Data?) {
+            guard data == nil, let candidate else { return }
+            if seen == nil { seen = candidate }
+            if isLiveClaudeCredential(candidate) { data = candidate }
+        }
+        consider(try? Data(contentsOf: directory.appendingPathComponent(".credentials.json")))
+        if data == nil, Date() < cachedUntil { consider(cachedClaude) }
+        if data == nil, isUserHome { consider(savedSession()) }
+        if data == nil, isUserHome { consider(keychainClaudeCodeCredentials(interactive: interactive)) }
+        if let data, let oauth = claudeOAuthPayload(data) {
+            cachedClaude = data
+            cachedUntil = oauth.expiry
+            if isUserHome { saveSession(token: oauth.token, expiry: oauth.expiry) }
+            var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
+            request.setValue("Bearer \(oauth.token)", forHTTPHeaderField: "Authorization")
+            request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+            return request
+        }
+        let expiredOAuth: Bool = {
+            guard let seen, let oauth = claudeOAuthPayload(seen), !oauth.empty else { return false }
+            return oauth.expiry <= Date() || oauth.token == rejectedClaudeToken
+        }()
+        // Empty/expired/rejected Claude Code-credentials (common when Claude Code uses ANTHROPIC_API_KEY only).
+        if seen != nil { forgetClaude() }
+        // Claude Desktop session cookie → organization usage (no Claude Code OAuth needed).
+        if let desktop = try? claudeDesktopUsageRequest(interactive: interactive, home: home) { return desktop }
+        if expiredOAuth {
+            throw MusicFailure(message: "La sesión OAuth de Claude Code ha caducado o ya no es válida. Abre Claude Code o ejecuta «claude auth login», o inicia sesión en la app Claude.")
+        }
+        if anthropicAPIKey() != nil {
+            throw MusicFailure(message: "Claude Code está con API key (sin OAuth) y no hay sesión usable de la app Claude. El EQ funciona; para límites en Isla: «claude auth login» o inicia sesión en Claude Desktop.")
+        }
+        throw MusicFailure(message: interactive
+            ? "No hay sesión de Claude. Ejecuta «claude auth login», inicia sesión en la app Claude (permitir «Claude Safe Storage»), o pega una key sk-ant- en Ajustes → Música."
+            : "No hay sesión de Claude. Pulsa «Permitir acceso a Claude» en Ajustes → IA, o inicia sesión en la app Claude / «claude auth login».")
+    }
 
- private func clearSecret(service:String) {
-  var allowed:DarwinBoolean=true;SecKeychainGetUserInteractionAllowed(&allowed);SecKeychainSetUserInteractionAllowed(false)
-  defer { SecKeychainSetUserInteractionAllowed(allowed.boolValue) }
-  SecItemDelete([kSecClass:kSecClassGenericPassword,kSecAttrService:service,kSecAttrAccount:"api-key"] as CFDictionary)
- }
+    /// Opens another app's SQLite file without taking a lock on it. `immutable=1` lets us read while
+    /// Cursor / Claude are running (they hold the database open), which used to fail intermittently.
+    private static func openReadOnly(_ url: URL) -> OpaquePointer? {
+        var db: OpaquePointer?
+        // Normal read-only open first: it honours the -wal file, so we see the token Cursor wrote last.
+        // `immutable=1` ignores the WAL and returned stale (expired) tokens → constant "disconnects".
+        if sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK {
+            sqlite3_busy_timeout(db, 1000)
+            if sqlite3_exec(db, "SELECT 1 FROM sqlite_master LIMIT 1", nil, nil, nil) == SQLITE_OK { return db }
+        }
+        if db != nil { sqlite3_close(db) }
+        db = nil
+        let uri = url.absoluteString + "?immutable=1"
+        guard sqlite3_open_v2(uri, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_URI, nil) == SQLITE_OK else {
+            if db != nil { sqlite3_close(db) }
+            return nil
+        }
+        sqlite3_busy_timeout(db, 1000)
+        return db
+    }
 
- private func storedSecret(service:String) -> String? {
-  let (status,result)=silentKeychain([kSecClass:kSecClassGenericPassword,kSecAttrService:service,kSecAttrAccount:"api-key",kSecReturnData:true,kSecMatchLimit:kSecMatchLimitOne])
-  guard status == errSecSuccess,let data=result as? Data,let key=String(data:data,encoding:.utf8) else { return nil }
-  let trimmed=key.trimmingCharacters(in:.whitespacesAndNewlines)
-  return trimmed.isEmpty ? nil : trimmed
- }
+    /// Claude Desktop keeps its own usage samples (`fh` five-hour %, `sd` seven-day %) on disk.
+    /// Used when the network routes fail (Cloudflare 403 on claude.ai, expired Claude Code token).
+    func claudeDesktopHistory(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> UsageSnapshot? {
+        let file = home.appendingPathComponent("Library/Application Support/Claude/plan-usage-history.json")
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        return try? AIUsageDecoder.decodeClaudeDesktopHistory(data)
+    }
 
- private func claudeOAuthToken(interactive:Bool,home:URL) throws -> String {
-  // Only return a live OAuth bearer — never the API-key fallback path from request(.claude).
-  let directory=ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"].map{URL(fileURLWithPath:$0)} ?? home.appendingPathComponent(".claude")
-  var data=try? Data(contentsOf:directory.appendingPathComponent(".credentials.json"))
-  if data == nil,Date()<cachedUntil { data=cachedClaude }
-  if data == nil,home == FileManager.default.homeDirectoryForCurrentUser { data=savedSession() }
-  if data == nil {
-   var wasAllowed:DarwinBoolean=true
-   SecKeychainGetUserInteractionAllowed(&wasAllowed)
-   SecKeychainSetUserInteractionAllowed(interactive)
-   defer { SecKeychainSetUserInteractionAllowed(wasAllowed.boolValue) }
-   let context=LAContext();context.interactionNotAllowed=true
-   let query:[CFString:Any]=[kSecClass:kSecClassGenericPassword,kSecAttrService:"Claude Code-credentials",kSecReturnAttributes:true,kSecReturnPersistentRef:true,kSecMatchLimit:kSecMatchLimitAll,kSecUseAuthenticationContext:context]
-   var result:CFTypeRef?
-   if SecItemCopyMatching(query as CFDictionary,&result) == errSecSuccess,let rows=result as? [[String:Any]],let newest=rows.sorted(by:{($0[kSecAttrModificationDate as String] as? Date ?? .distantPast)>($1[kSecAttrModificationDate as String] as? Date ?? .distantPast)}).first,let ref=newest[kSecValuePersistentRef as String] {
-    context.interactionNotAllowed = !interactive
-    let read:[CFString:Any]=[kSecClass:kSecClassGenericPassword,kSecValuePersistentRef:ref,kSecReturnData:true,kSecMatchLimit:kSecMatchLimitOne,kSecUseAuthenticationContext:context]
-    var secret:CFTypeRef?
-    if SecItemCopyMatching(read as CFDictionary,&secret) == errSecSuccess { data=secret as? Data }
-   }
-  }
-  guard let data,let oauth=claudeOAuthPayload(data),!oauth.empty,oauth.expiry>Date() else {
-   throw MusicFailure(message:"Sin sesión OAuth válida de Claude Code.")
-  }
-  cachedClaude=data;cachedUntil=oauth.expiry
-  return oauth.token
- }
+    private func isLiveClaudeCredential(_ data: Data) -> Bool {
+        guard let oauth = claudeOAuthPayload(data) else { return false }
+        return !oauth.empty && oauth.expiry > Date() && oauth.token != rejectedClaudeToken
+    }
+
+    /// Claude Code's own keychain item, newest first. Background refresh never opens a permission dialog.
+    private func keychainClaudeCodeCredentials(interactive: Bool) -> Data? {
+        // Legacy login-keychain items ignore LAContext. Disable interaction at the process level too.
+        var wasAllowed: DarwinBoolean = true
+        SecKeychainGetUserInteractionAllowed(&wasAllowed)
+        SecKeychainSetUserInteractionAllowed(interactive)
+        defer { SecKeychainSetUserInteractionAllowed(wasAllowed.boolValue) }
+        // Enumerate metadata first, then read the newest item.
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: "Claude Code-credentials",
+            kSecReturnAttributes: true,
+            kSecReturnPersistentRef: true,
+            kSecMatchLimit: kSecMatchLimitAll,
+            kSecUseAuthenticationContext: context,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let rows = result as? [[String: Any]],
+              let newest = rows.sorted(by: {
+                  ($0[kSecAttrModificationDate as String] as? Date ?? .distantPast) > ($1[kSecAttrModificationDate as String] as? Date ?? .distantPast)
+              }).first,
+              let ref = newest[kSecValuePersistentRef as String]
+        else { return nil }
+        context.interactionNotAllowed = !interactive
+        let read: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecValuePersistentRef: ref,
+            kSecReturnData: true,
+            kSecMatchLimit: kSecMatchLimitOne,
+            kSecUseAuthenticationContext: context,
+        ]
+        var secret: CFTypeRef?
+        guard SecItemCopyMatching(read as CFDictionary, &secret) == errSecSuccess else { return nil }
+        return secret as? Data
+    }
+
+    /// The usage endpoint refused this OAuth bearer: stop reusing it so `request(.claude, …)` can fall back
+    /// to the Claude Desktop session instead of failing every 15 minutes with the same token.
+    func rejectClaudeOAuth(_ request: URLRequest) {
+        guard let header = request.value(forHTTPHeaderField: "Authorization"), header.hasPrefix("Bearer ") else { return }
+        forgetClaude()
+        rejectedClaudeToken = String(header.dropFirst("Bearer ".count))
+    }
+
+    /// Reads Claude Desktop's encrypted `sessionKey` cookie and asks claude.ai for usage.
+    private func claudeDesktopUsageRequest(interactive: Bool, home: URL) throws -> URLRequest {
+        // Electron ≥ 96 keeps cookies in Network/Cookies; older builds used Cookies at the top level.
+        let support = home.appendingPathComponent("Library/Application Support/Claude")
+        let candidates = ["Network/Cookies", "Cookies"].map { support.appendingPathComponent($0) }
+        guard let cookies = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
+              let db = Self.openReadOnly(cookies)
+        else {
+            throw MusicFailure(message: "Abre la app Claude e inicia sesión.")
+        }
+        defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 1000)
+        func encrypted(_ name: String) -> Data? {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "SELECT encrypted_value FROM cookies WHERE name=? AND host_key IN ('.claude.ai','claude.ai') ORDER BY LENGTH(encrypted_value) DESC LIMIT 1", -1, &statement, nil) == SQLITE_OK else { return nil }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_text(statement, 1, name, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            guard sqlite3_step(statement) == SQLITE_ROW, let bytes = sqlite3_column_blob(statement, 0) else { return nil }
+            return Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 0)))
+        }
+        guard let sessionBlob = encrypted("sessionKey") else {
+            throw MusicFailure(message: "Inicia sesión en la app Claude.")
+        }
+        let password = try keychainPassword(service: "Claude Safe Storage", account: "Claude Key", interactive: interactive)
+        let session = try ElectronSafeStorage.chromeCookieValue(sessionBlob, password: password)
+        let organization: String
+        if let orgBlob = encrypted("lastActiveOrg"),
+           let org = try? ElectronSafeStorage.chromeCookieValue(orgBlob, password: password),
+           !org.isEmpty {
+            organization = org
+        } else {
+            let history = home.appendingPathComponent("Library/Application Support/Claude/plan-usage-history.json")
+            guard let data = try? Data(contentsOf: history),
+                  let row = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let samples = row["samples"] as? [[String: Any]],
+                  let org = samples.last?["org"] as? String,
+                  !org.isEmpty
+            else {
+                throw MusicFailure(message: "Abre Claude Desktop y consulta Uso una vez para fijar la organización.")
+            }
+            organization = org
+        }
+        var request = URLRequest(url: URL(string: "https://claude.ai/api/organizations/\(organization)/usage")!)
+        request.setValue("sessionKey=\(session); lastActiveOrg=\(organization)", forHTTPHeaderField: "Cookie")
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Claude", forHTTPHeaderField: "User-Agent")
+        request.setValue("https://claude.ai", forHTTPHeaderField: "Origin")
+        request.setValue("https://claude.ai/settings/usage", forHTTPHeaderField: "Referer")
+        return request
+    }
+
+    /// API key for calling Anthropic Messages (auto-EQ).
+    /// Order: Isla keychain API key → process env / login-shell `ANTHROPIC_API_KEY`.
+    /// Claude Code's OAuth token is deliberately NOT used here: it belongs to the user's
+    /// Claude Code subscription, not to third-party apps, and can stop working at any time.
+    /// (It is still read — read-only — to show usage limits in `request(.claude, …)`.)
+    func claudeAPIKey() throws -> String {
+        if let key = anthropicAPIKey() { return key }
+        throw MusicFailure(message: """
+        Auto-EQ con Claude necesita una API key de Anthropic.
+        1) Pégala (sk-ant-…) en Ajustes → Música → EQ con IA.
+        2) O define ANTHROPIC_API_KEY en tu shell de login (~/.zshrc); Isla la importa al llavero.
+        """)
+    }
+
+    /// Any Anthropic API key Isla can use (keychain, env, or login shell).
+    func anthropicAPIKey() -> String? {
+        if let key = storedSecret(service: apiKeyService), !key.isEmpty { return key }
+        if let key = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty {
+            try? storeSecret(key, service: apiKeyService)
+            return key
+        }
+        if let key = loginShellAnthropicAPIKey() {
+            try? storeSecret(key, service: apiKeyService)
+            return key
+        }
+        return nil
+    }
+
+    /// GUI apps don't inherit ~/.zshrc — read ANTHROPIC_API_KEY from a login shell once.
+    private func loginShellAnthropicAPIKey() -> String? {
+        let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: shell)
+        process.arguments = ["-l", "-c", "printenv ANTHROPIC_API_KEY"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0,
+              let key = String(data: data, encoding: .utf8)?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              key.hasPrefix("sk-ant-"), key.count > 20
+        else { return nil }
+        return key
+    }
+
+    /// OpenAI / ChatGPT API key for music AI EQ fallback.
+    func openAIAPIKey() throws -> String {
+        if let key = storedSecret(service: openAIKeyService), !key.isEmpty { return key }
+        if let key = ProcessInfo.processInfo.environment["OPENAI_API_KEY"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty {
+            return key
+        }
+        throw MusicFailure(message: "Falta la API key de ChatGPT. Pégala en Ajustes → Música → EQ con IA, o exporta OPENAI_API_KEY.")
+    }
+
+    func hasStoredAnthropicAPIKey() -> Bool { storedSecret(service: apiKeyService)?.isEmpty == false }
+    func hasStoredOpenAIAPIKey() -> Bool { storedSecret(service: openAIKeyService)?.isEmpty == false }
+
+    func saveAnthropicAPIKey(_ key: String) throws {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("sk-ant-"), trimmed.count > 20 else {
+            throw MusicFailure(message: "La API key de Anthropic debe empezar por sk-ant-.")
+        }
+        try storeSecret(trimmed, service: apiKeyService)
+    }
+
+    func saveOpenAIAPIKey(_ key: String) throws {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("sk-"), !trimmed.hasPrefix("sk-ant-"), trimmed.count > 20 else {
+            throw MusicFailure(message: "La API key de OpenAI/ChatGPT debe empezar por sk- (no sk-ant-).")
+        }
+        try storeSecret(trimmed, service: openAIKeyService)
+    }
+
+    func clearAnthropicAPIKey() { clearSecret(service: apiKeyService) }
+    func clearOpenAIAPIKey() { clearSecret(service: openAIKeyService) }
+
+    private func storeSecret(_ value: String, service: String) throws {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: "api-key",
+        ]
+        var allowed: DarwinBoolean = true
+        SecKeychainGetUserInteractionAllowed(&allowed)
+        SecKeychainSetUserInteractionAllowed(false)
+        defer { SecKeychainSetUserInteractionAllowed(allowed.boolValue) }
+        let data = Data(value.utf8)
+        if SecItemUpdate(query as CFDictionary, [kSecValueData: data] as CFDictionary) == errSecItemNotFound {
+            var add = query
+            add[kSecValueData] = data
+            add[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlock
+            let status = SecItemAdd(add as CFDictionary, nil)
+            guard status == errSecSuccess || status == errSecDuplicateItem else {
+                throw MusicFailure(message: "No se pudo guardar la API key en el llavero.")
+            }
+        }
+    }
+
+    private func clearSecret(service: String) {
+        var allowed: DarwinBoolean = true
+        SecKeychainGetUserInteractionAllowed(&allowed)
+        SecKeychainSetUserInteractionAllowed(false)
+        defer { SecKeychainSetUserInteractionAllowed(allowed.boolValue) }
+        SecItemDelete([
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: "api-key",
+        ] as CFDictionary)
+    }
+
+    private func storedSecret(service: String) -> String? {
+        let (status, result) = silentKeychain([
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: "api-key",
+            kSecReturnData: true,
+            kSecMatchLimit: kSecMatchLimitOne,
+        ])
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let key = String(data: data, encoding: .utf8)
+        else { return nil }
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 }
-@MainActor final class AIUsageService:ObservableObject {
- let provider:AIProvider
- @Published var snapshot:UsageSnapshot?
- @Published var error:String?
- @Published var loading=false
- @Published var enabled=false
- @Published var stale=false
- @Published private(set) var accessRequested=false
- /// Notch only shows accounts that already returned live limits (connect in Ajustes first).
- var notchReady:Bool { enabled && snapshot != nil }
- private let reader=AICredentialReader()
- private var timer:Timer?
- private var generation=0
- private var task:Task<Void,Never>?
- private var retryAfter=Date.distantPast
- init(_ provider:AIProvider) { self.provider=provider;accessRequested=provider == .claude && UserDefaults.standard.bool(forKey:"claudeAccessRequested") }
- func connect() { guard !enabled else { return };enabled=true;generation += 1;task=Task { await refresh() } }
- func disconnect() { enabled=false;generation += 1;task?.cancel();task=nil;timer?.invalidate();timer=nil;loading=false;stale=snapshot != nil;if !stale { snapshot=nil;error=nil } }
- func refresh(interactive:Bool=false) async {
-  guard enabled,!loading else { return }
-  guard Date()>=retryAfter else { schedule();return }
-  let g=generation;loading=true
-  defer { if g == generation { loading=false;if enabled { schedule() } } }
-  do {
-   // Cursor may need one keychain prompt for «Cursor Safe Storage»; Claude may need «Claude Code-credentials».
-   let mayAsk=interactive
-   if mayAsk,provider == .claude { accessRequested=true;UserDefaults.standard.set(true,forKey:"claudeAccessRequested") }
-   var request=try await reader.request(provider,interactive:mayAsk)
-   guard enabled,g == generation,!Task.isCancelled else { return }
-   request.timeoutInterval=30;request.setValue("application/json",forHTTPHeaderField:"Accept")
-   let (data,response)=try await AIHTTPClient.data(for:request,attempts:3)
-   guard enabled,g == generation,!Task.isCancelled else { return }
-   let http=response as? HTTPURLResponse,code=http?.statusCode ?? 0
-   if code == 429 { retryAfter=Date().addingTimeInterval(max(900,Double(http?.value(forHTTPHeaderField:"Retry-After") ?? "") ?? 0));throw MusicFailure(message:"\(provider.title) limita las consultas. Se actualizará más tarde.") }
-   if provider == .claude,[401,403].contains(code) { await reader.forgetClaude() }
-   guard code == 200 else { throw MusicFailure(message:[401,403].contains(code) ? "Abre \(provider.title == "Claude" ? "Claude Code" : provider.title) y renueva tu sesión." : "No se pudo consultar \(provider.title) (\(code)).") }
-   snapshot=try AIUsageDecoder.decode(data,provider:provider,fetchedAt:Date());error=nil;stale=false
-  } catch { guard enabled,g == generation,!Task.isCancelled else { return };self.error=error is MusicFailure || error is AIUsageDecoder.Failure || error is ElectronSafeStorage.Failure ? error.localizedDescription : error.localizedDescription;stale=snapshot != nil }
- }
- private func schedule() {
-  timer?.invalidate()
-  let delay=max(900,retryAfter.timeIntervalSinceNow)
-  timer=Timer.scheduledTimer(withTimeInterval:delay,repeats:false) { [weak self] _ in Task { @MainActor in await self?.refresh() } };timer?.tolerance=60
- }
+
+@MainActor final class AIUsageService: ObservableObject {
+    let provider: AIProvider
+    @Published var snapshot: UsageSnapshot?
+    @Published var error: String?
+    @Published var loading = false
+    @Published var enabled = false
+    @Published var stale = false
+    @Published private(set) var accessRequested = false
+    /// A connected account always stays in the notch; it shows "Sin datos" / stale values while limits can't be read.
+    var notchReady: Bool { enabled }
+    private let reader = AICredentialReader.shared
+    private var timer: Timer?
+    private var generation = 0
+    private var task: Task<Void, Never>?
+    private var retryAfter = Date.distantPast
+
+    init(_ provider: AIProvider) {
+        self.provider = provider
+        accessRequested = provider == .claude && UserDefaults.standard.bool(forKey: "claudeAccessRequested")
+        // Last known limits survive relaunches, so the account doesn't flash "Sin datos" until the first refresh.
+        if let data = UserDefaults.standard.data(forKey: "aiUsageSnapshot.\(provider.rawValue)"),
+           let saved = try? JSONDecoder().decode(UsageSnapshot.self, from: data) {
+            snapshot = saved
+            stale = true
+        }
+    }
+
+    func connect() {
+        guard !enabled else { return }
+        enabled = true
+        generation += 1
+        task = Task { await refresh() }
+    }
+
+    func disconnect() {
+        enabled = false
+        generation += 1
+        task?.cancel()
+        task = nil
+        timer?.invalidate()
+        timer = nil
+        loading = false
+        stale = snapshot != nil
+        if !stale {
+            snapshot = nil
+            error = nil
+        }
+    }
+
+    /// Screen/system sleep: stop polling but stay connected, so the account doesn't vanish from the notch.
+    func pause() {
+        generation += 1
+        task?.cancel()
+        task = nil
+        timer?.invalidate()
+        timer = nil
+        loading = false
+    }
+
+    /// Wake: refresh now if the account is connected and nothing is already scheduled.
+    func resume() {
+        guard enabled else { return }
+        timer?.invalidate()
+        timer = nil
+        task?.cancel()
+        generation += 1
+        loading = false
+        task = Task { await refresh() }
+    }
+
+    func refresh(interactive: Bool = false) async {
+        guard enabled, !loading else { return }
+        guard Date() >= retryAfter else {
+            schedule()
+            return
+        }
+        let g = generation
+        loading = true
+        defer {
+            if g == generation {
+                loading = false
+                if enabled { schedule() }
+            }
+        }
+        do {
+            // Cursor may need one keychain prompt for «Cursor Safe Storage»; Claude may need «Claude Code-credentials».
+            let mayAsk = interactive
+            if mayAsk, provider == .claude {
+                accessRequested = true
+                UserDefaults.standard.set(true, forKey: "claudeAccessRequested")
+            }
+            var request = try await reader.request(provider, interactive: mayAsk)
+            guard enabled, g == generation, !Task.isCancelled else { return }
+            var (data, response) = try await fetch(request)
+            guard enabled, g == generation, !Task.isCancelled else { return }
+            var http = response as? HTTPURLResponse, code = http?.statusCode ?? 0
+            // Claude Code's OAuth token was refused (revoked / rotated): drop it and retry once,
+            // which falls back to the Claude Desktop session when there is one.
+            if provider == .claude, [401, 403].contains(code), request.url?.host == "api.anthropic.com" {
+                await reader.rejectClaudeOAuth(request)
+                request = try await reader.request(provider, interactive: mayAsk)
+                guard enabled, g == generation, !Task.isCancelled else { return }
+                (data, response) = try await fetch(request)
+                guard enabled, g == generation, !Task.isCancelled else { return }
+                http = response as? HTTPURLResponse
+                code = http?.statusCode ?? 0
+            }
+            if code == 429 {
+                retryAfter = Date().addingTimeInterval(max(900, Double(http?.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 0))
+                throw MusicFailure(message: "\(provider.title) limita las consultas. Se actualizará más tarde.")
+            }
+            if provider == .claude, [401, 403].contains(code) { await reader.forgetClaude() }
+            guard code == 200 else {
+                throw MusicFailure(message: [401, 403].contains(code)
+                    ? Self.sessionExpiredMessage(provider: provider, host: request.url?.host)
+                    : "No se pudo consultar \(provider.title) (\(code)).")
+            }
+            snapshot = try AIUsageDecoder.decode(data, provider: provider, fetchedAt: Date())
+            if let snapshot, let saved = try? JSONEncoder().encode(snapshot) {
+                UserDefaults.standard.set(saved, forKey: "aiUsageSnapshot.\(provider.rawValue)")
+            }
+            error = nil
+            stale = false
+        } catch {
+            guard enabled, g == generation, !Task.isCancelled else { return }
+            if provider == .claude, let local = await reader.claudeDesktopHistory(),
+               snapshot.map({ local.fetchedAt > $0.fetchedAt }) ?? true {
+                snapshot = local
+                stale = true
+                self.error = error.localizedDescription
+                return
+            }
+            self.error = error.localizedDescription
+            stale = snapshot != nil
+        }
+    }
+
+    /// Old data is shown greyed out: either the last refresh failed or it is older than two refresh periods.
+    func isStale(at date: Date = Date()) -> Bool {
+        stale || (snapshot.map { date.timeIntervalSince($0.fetchedAt) > 1800 } ?? false)
+    }
+
+    private func fetch(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        var request = request
+        request.timeoutInterval = 30
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        return try await AIHTTPClient.data(for: request, attempts: 3)
+    }
+
+    private static func sessionExpiredMessage(provider: AIProvider, host: String?) -> String {
+        switch (provider, host) {
+        case (.claude, "claude.ai"): "La sesión de la app Claude ha caducado. Ábrela, inicia sesión y pulsa Actualizar."
+        case (.claude, _): "La sesión de Claude Code ya no es válida. Ejecuta «claude auth login» o inicia sesión en la app Claude."
+        default: "Abre \(provider.title) y renueva tu sesión."
+        }
+    }
+
+    private func schedule() {
+        timer?.invalidate()
+        let delay = max(900, retryAfter.timeIntervalSinceNow)
+        timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            Task { @MainActor in await self?.refresh() }
+        }
+        timer?.tolerance = 60
+    }
 }
+
 @MainActor final class AIUsageAccounts {
- static let shared=AIUsageAccounts()
- let cursor=AIUsageService(.cursor)
- let claude=AIUsageService(.claude)
- func apply(_ value:Preferences) { if value.cursorEnabled { cursor.connect() } else { cursor.disconnect() };if value.claudeEnabled { claude.connect() } else { claude.disconnect() } }
- func suspend() { cursor.disconnect();claude.disconnect() }
+    static let shared = AIUsageAccounts()
+    let cursor = AIUsageService(.cursor)
+    let claude = AIUsageService(.claude)
+
+    func apply(_ value: Preferences) {
+        if value.cursorEnabled { cursor.connect() } else { cursor.disconnect() }
+        if value.claudeEnabled { claude.connect() } else { claude.disconnect() }
+    }
+
+    func suspend() {
+        cursor.pause()
+        claude.pause()
+    }
+
+    /// Resume accounts that stayed connected, then connect any that were enabled meanwhile.
+    func resume(_ value: Preferences) {
+        cursor.resume()
+        claude.resume()
+        apply(value)
+    }
 }

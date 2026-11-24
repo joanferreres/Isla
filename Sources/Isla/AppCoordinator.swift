@@ -67,13 +67,13 @@ import IslandCore
 
  let center=NSWorkspace.shared.notificationCenter
  Publishers.Merge(center.publisher(for:NSWorkspace.willSleepNotification),center.publisher(for:NSWorkspace.screensDidSleepNotification)).sink { [weak self] _ in
- guard let self else { return };self.music.pauseForSleep();self.activity.pauseForSleep();self.usage.disconnect();AIUsageAccounts.shared.suspend();self.lid.suspend();self.updates.suspend()
+ guard let self else { return };self.music.pauseForSleep();self.activity.pauseForSleep();self.usage.pause();AIUsageAccounts.shared.suspend();self.lid.suspend();self.updates.suspend()
  }.store(in:&integrationSubscriptions)
  Publishers.Merge(center.publisher(for:NSWorkspace.didWakeNotification),center.publisher(for:NSWorkspace.screensDidWakeNotification)).sink { [weak self] _ in
  guard let self else { return };let value=self.preferences.value
  self.updates.start()
- AIUsageAccounts.shared.apply(value)
- if value.musicEnabled { self.music.connect() };if value.codexEnabled { self.activity.connect();self.usage.connect() };if value.lidEffectEnabled { Task { await self.lid.enable() } }
+ AIUsageAccounts.shared.resume(value)
+ if value.musicEnabled { self.music.connect() };if value.codexEnabled { self.activity.connect();self.usage.resume();self.usage.connect() };if value.lidEffectEnabled { Task { await self.lid.enable() } }
  }.store(in:&integrationSubscriptions)
  installMainMenu()
  status = NSStatusBar.system.statusItem(withLength: 28)

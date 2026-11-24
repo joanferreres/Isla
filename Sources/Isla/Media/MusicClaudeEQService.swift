@@ -27,15 +27,13 @@ actor MusicClaudeEQService {
         }
     }
 
-    private let reader = AICredentialReader()
+    private let reader = AICredentialReader.shared
     /// Per track+output (exact repeats).
     private var cache: [String: Advice] = [:]
     /// Per Music/Claude genre+output — skips API when the next track shares the genre.
     private var genreCache: [String: Advice] = [:]
-    /// Auto-EQ must stay on the cheapest Claude tier (Haiku). Never Sonnet/Opus — token burn for a JSON EQ tip.
-    private let claudeModel = "claude-haiku-4-5-20251001"
-    /// Fallback when Claude auth is missing — also the cheap OpenAI tier.
-    private let openAIModel = "gpt-4o-mini"
+    private let claudeModel = AIModels.claudeEQ
+    private let openAIModel = AIModels.openAIEQ
 
     /// Normalize library / model genre labels for cheap equality checks.
     static func normalizeGenre(_ raw: String) -> String {
@@ -85,10 +83,10 @@ actor MusicClaudeEQService {
         var lastAuth: String?
         var lastNetwork: String?
 
-        // 1) Claude — Isla API key preferred, then OAuth (Haiku).
+        // 1) Claude — Anthropic API key (keychain / env), Haiku.
         do {
-            let auth = try await reader.claudeAPIAuth(interactive: interactiveAuth)
-            var advice = try await askClaude(auth: auth, system: prompt.system, user: prompt.user, presets: presets)
+            let apiKey = try await reader.claudeAPIKey()
+            var advice = try await askClaude(apiKey: apiKey, system: prompt.system, user: prompt.user, presets: presets)
             advice.provider = "Claude·Haiku"
             advice = output.adapted(advice)
             remember(advice, key: key, musicGenre: musicGenre, output: output)
@@ -150,19 +148,13 @@ actor MusicClaudeEQService {
         return (system, user)
     }
 
-    private func askClaude(auth: ClaudeAPIAuth, system: String, user: String, presets: [String]) async throws -> Advice {
+    private func askClaude(apiKey: String, system: String, user: String, presets: [String]) async throws -> Advice {
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         request.httpMethod = "POST"
         request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        switch auth {
-        case .oauth(let token):
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        case .apiKey(let key):
-            request.setValue(key, forHTTPHeaderField: "x-api-key")
-        }
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "model": claudeModel,
             "max_tokens": 200,
@@ -182,7 +174,7 @@ actor MusicClaudeEQService {
         guard (200...299).contains(code) else {
             let snippet = String(data: data, encoding: .utf8)?.prefix(180) ?? ""
             if [401, 403].contains(code) {
-                throw Failure.auth("Claude rechazó la autenticación (\(code)). Revisa la key o «claude auth login».")
+                throw Failure.auth("Claude rechazó la autenticación (\(code)). Revisa la API key en Ajustes → Música.")
             }
             throw Failure.network("Claude API \(code): \(snippet)")
         }
@@ -227,19 +219,13 @@ actor MusicClaudeEQService {
 
     /// Tiny Messages probe after saving a key — surfaces TLS/auth errors immediately in Ajustes.
     func verifyClaudeAPIKey() async throws {
-        let auth = try await reader.claudeAPIAuth(interactive: false)
+        let apiKey = try await reader.claudeAPIKey()
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         request.httpMethod = "POST"
         request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        switch auth {
-        case .oauth(let token):
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        case .apiKey(let key):
-            request.setValue(key, forHTTPHeaderField: "x-api-key")
-        }
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "model": claudeModel,
             "max_tokens": 1,

@@ -55,6 +55,18 @@ import SQLite3
  let second=try await reader.request(.claude,interactive:false,home:home)
  XCTAssertEqual(first.value(forHTTPHeaderField:"Authorization"),second.value(forHTTPHeaderField:"Authorization"))
  }
+ func testRejectedTokenIsNotReusedAndExplainsLogin() async throws {
+ let home=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+ defer { try? FileManager.default.removeItem(at:home) }
+ let directory=home.appendingPathComponent(".claude")
+ try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
+ try JSONSerialization.data(withJSONObject:["claudeAiOauth":["accessToken":"revoked-fixture","expiresAt":Date().addingTimeInterval(3600).timeIntervalSince1970*1000]]).write(to:directory.appendingPathComponent(".credentials.json"))
+ let reader=AICredentialReader()
+ let first=try await reader.request(.claude,interactive:false,home:home)
+ XCTAssertEqual(first.value(forHTTPHeaderField:"Authorization"),"Bearer revoked-fixture")
+ await reader.rejectClaudeOAuth(first)
+ do { _=try await reader.request(.claude,interactive:false,home:home);XCTFail("Rejected token must not be reused") } catch { XCTAssertTrue(error.localizedDescription.contains("ya no es válida")) }
+ }
  func testExpiredSessionExplainsLoginInsteadOfAskingPermissionAgain() async throws {
  let home=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
  defer { try? FileManager.default.removeItem(at:home) }

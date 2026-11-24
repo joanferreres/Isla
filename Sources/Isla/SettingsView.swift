@@ -228,7 +228,7 @@ private struct MusicAIEQKeySetup: View {
 
  var body: some View {
  VStack(alignment: .leading, spacing: 10) {
-  Text("Las keys se guardan en el llavero de macOS (no en texto plano). Claude Code OAuth sigue teniendo prioridad si existe.")
+  Text("Las keys se guardan en el llavero de macOS (no en texto plano). El EQ solo usa API keys, nunca tu sesión de Claude Code.")
    .font(.caption)
    .foregroundStyle(.secondary)
 
@@ -279,7 +279,7 @@ private struct MusicAIEQKeySetup: View {
   if let status {
    Text(status).font(.caption2).foregroundStyle(.secondary)
   }
-  Text("Orden EQ: key Claude (llavero) → OAuth Claude Code → key ChatGPT. Modelo: Haiku (barato).")
+  Text("Orden EQ: key Claude (llavero o ANTHROPIC_API_KEY) → key ChatGPT. Modelo: Haiku (barato).")
    .font(.caption2)
    .foregroundStyle(.secondary)
  }

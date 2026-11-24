@@ -35,6 +35,8 @@ struct RecordPlayerMixer: View {
     @State private var spotifyEqualizer = SpotifyEqualizer()
     @State private var spotifyEQError: String?
     @State private var spotifyEQBusy = false
+    /// Latest Spotify change requested while another one was still being applied (nil band = all).
+    @State private var spotifyPending: (gain: Double, band: MixerBand?)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -49,7 +51,7 @@ struct RecordPlayerMixer: View {
                         EQKnob(title: band.title, gain: gains[band], accent: palette.accent) { value in
                             adjust(value, band: band)
                         }
-                        .disabled(!active || spotifyEQBusy)
+                        .disabled(!active)
                     }
                 }
                 volumeFader
@@ -201,7 +203,7 @@ struct RecordPlayerMixer: View {
         .buttonBorderShape(.capsule)
         .accessibilityLabel("Restablecer ecualizador")
         .help("Poner graves, medios y agudos a cero")
-        .disabled(!active || spotifyEQBusy)
+        .disabled(!active)
         if #available(macOS 26.0, *), !reduceTransparency {
             button.buttonStyle(.glass)
         } else {
@@ -254,7 +256,7 @@ struct RecordPlayerMixer: View {
                 .font(.caption2.monospacedDigit())
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Volumen de (music.sourceTitle)")
+        .accessibilityLabel("Volumen de \(music.sourceTitle)")
         .accessibilityValue(volume.map { "\($0) por ciento" } ?? "No disponible")
         .accessibilityAdjustableAction { direction in
             guard let volume else { return }
@@ -299,26 +301,65 @@ struct RecordPlayerMixer: View {
         applyEQ(preview: preview, userInitiated: true) {
             await equalizer.invalidatePendingWrites()
             let result = try await equalizer.setAll(preview)
-            selectedPreset = try? await equalizer.currentPresetName() ?? "Manual"
+            selectedPreset = "Manual"
             return result
         }
     }
 
     private func adjustSpotify(_ target: Double, band: MixerBand?) {
-        guard !spotifyEQBusy, active else { return }
+        guard active else { return }
+        let gain = min(12, max(-12, target)).rounded()
+        // Show the new position right away; Spotify confirms (or corrects) it afterwards.
+        if let band {
+            gains[band] = gain
+        } else {
+            for each in MixerBand.allCases { gains[each] = gain }
+        }
+        // A change made while Spotify is busy is kept and applied next, never dropped.
+        if spotifyEQBusy {
+            if let pending = spotifyPending, pending.band != band {
+                spotifyPending = (gain, nil) // two different bands: re-send all bands from `gains`
+            } else {
+                spotifyPending = (gain, band)
+            }
+            return
+        }
         spotifyEQBusy = true
         spotifyEQError = nil
         Task {
-            defer { spotifyEQBusy = false }
-            do {
-                let result = try await spotifyEqualizer.apply(target, band: band)
-                if !supportsEQ { gains = result }
-            } catch MusicEqualizer.Failure.access {
-                spotifyEQError = "Permite Isla en Privacidad y seguridad → Accesibilidad para ajustar Spotify."
-            } catch {
-                spotifyEQError = error.localizedDescription
+            var next: (gain: Double, band: MixerBand?)? = (gain, band)
+            while let request = next {
+                do {
+                    let result: [MixerBand: Double]
+                    if request.band == nil, spotifyPending == nil, Set(gains.values).count > 1 {
+                        result = try await applySpotifyBands(gains)
+                    } else {
+                        result = try await spotifyEqualizer.apply(request.gain, band: request.band)
+                    }
+                    if !supportsEQ, spotifyPending == nil {
+                        gains = result.mapValues { $0.rounded() }
+                    }
+                } catch MusicEqualizer.Failure.access {
+                    spotifyEQError = "Permite Isla en Privacidad y seguridad → Accesibilidad para ajustar Spotify."
+                    spotifyPending = nil
+                } catch {
+                    spotifyEQError = error.localizedDescription
+                    spotifyPending = nil
+                }
+                next = spotifyPending
+                spotifyPending = nil
             }
+            spotifyEQBusy = false
         }
+    }
+
+    /// Sends each band's own value (used when several knobs changed while Spotify was busy).
+    private func applySpotifyBands(_ target: [MixerBand: Double]) async throws -> [MixerBand: Double] {
+        var result: [MixerBand: Double] = [:]
+        for band in MixerBand.allCases {
+            result = try await spotifyEqualizer.apply(target[band] ?? 0, band: band)
+        }
+        return result
     }
 
     private func enableClaudeStyle() {
@@ -415,7 +456,8 @@ struct RecordPlayerMixer: View {
     }
 
     private func applyClaudeEQIfNeeded() async {
-        guard preferences.value.musicClaudeEQEnabled, active, music.enabled else {
+        // Claude EQ drives Music's equalizer only; Spotify has no presets to pick from.
+        guard supportsEQ, preferences.value.musicClaudeEQEnabled, active, music.enabled else {
             claudeStatus = nil
             return
         }
@@ -545,79 +587,5 @@ struct RecordPlayerMixer: View {
                 return result
             }
         }
-    }
-}
-
-private struct EQKnob: View {
-    let title: String
-    let gain: Double?
-    let accent: Color
-    let apply: (Double) -> Void
-
-    @GestureState private var adjustment: Double?
-    @FocusState private var focused: Bool
-
-    private var displayedGain: Double? { adjustment ?? gain }
-
-    var body: some View {
-        HStack(spacing: 7) {
-            ZStack {
-                Circle().trim(from: 0, to: 0.75)
-                    .stroke(.secondary.opacity(0.55), style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                    .rotationEffect(.degrees(135))
-                Circle().fill(.linearGradient(colors: [Color(white: 0.30), Color(white: 0.08)],
-                                              startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .strokeBorder(.white.opacity(0.28), style: StrokeStyle(lineWidth: 3, dash: [1, 1.8]))
-                    .padding(4)
-                    .shadow(color: .black.opacity(0.5), radius: 1, y: 2)
-                Capsule().fill(accent)
-                    .frame(width: 3, height: 12)
-                    .offset(y: -17)
-                    .rotationEffect(.degrees((displayedGain ?? 0) * 11.25))
-                if focused, adjustment == nil {
-                    Circle().strokeBorder(accent.opacity(0.65), lineWidth: 1.5)
-                }
-            }
-            .frame(width: 54, height: 54)
-            .frame(width: 60, height: 60)
-            .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 3)
-                .updating($adjustment) { drag, preview, _ in
-                    // Snap the preview to whole dB so releasing never visually
-                    // jumps from a fractional drag back to the committed value.
-                    preview = min(12, max(-12, (gain ?? 0) + delta(drag.translation))).rounded()
-                }
-                .onEnded { drag in
-                    let target = min(12, max(-12, (gain ?? 0) + delta(drag.translation))).rounded()
-                    if target != gain { apply(target) }
-                })
-            .onTapGesture(count: 2) { apply(0) }
-            .focusable()
-            .focusEffectDisabled()
-            .focused($focused)
-            .onMoveCommand { direction in
-                switch direction {
-                case .up, .right: apply(min(12, (gain ?? 0) + 1))
-                case .down, .left: apply(max(-12, (gain ?? 0) - 1))
-                @unknown default: break
-                }
-            }
-            Text(title).font(.callout.weight(.medium))
-                .frame(width: 48, alignment: .leading)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityValue(displayedGain.map { "\(Int($0)) decibelios" } ?? "No disponible")
-        .accessibilityAdjustableAction { direction in
-            switch direction {
-            case .increment: apply(min(12, (gain ?? 0) + 1))
-            case .decrement: apply(max(-12, (gain ?? 0) - 1))
-            @unknown default: break
-            }
-        }
-    }
-
-    private func delta(_ translation: CGSize) -> Double {
-        (translation.width - translation.height) / 6
     }
 }

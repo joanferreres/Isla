@@ -38,6 +38,10 @@ actor SpotifyEqualizer {
             guard AXUIElementPerformAction(toggle, kAXPressAction as CFString) == .success else {
                 throw MusicFailure(message: "Spotify no pudo activar su ecualizador.")
             }
+            // Spotify updates the checkbox asynchronously; give it a moment before the sliders.
+            for _ in 0..<6 where number(toggle) != 1 {
+                try await Task.sleep(for: .milliseconds(50))
+            }
         }
         for (index, slider) in sliders.enumerated() where band == nil || bands[index / 2] == band {
             let lower = (attribute(slider, kAXMinValueAttribute) as? NSNumber)?.doubleValue ?? -12
@@ -50,7 +54,7 @@ actor SpotifyEqualizer {
         }
         guard number(toggle) == 1 else { throw MusicFailure(message: "El ecualizador de Spotify sigue desactivado.") }
         return Dictionary(uniqueKeysWithValues: bands.enumerated().map { index, band in
-            (band, ((number(sliders[index * 2]) ?? 0) + (number(sliders[index * 2 + 1]) ?? 0)) / 2)
+            (band, (((number(sliders[index * 2]) ?? 0) + (number(sliders[index * 2 + 1]) ?? 0)) / 2).rounded())
         })
     }
 

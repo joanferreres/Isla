@@ -29,6 +29,10 @@ actor CodexCredentialReader {
  timer=Timer.scheduledTimer(withTimeInterval:delay,repeats:false) { [weak self] _ in Task { @MainActor in await self?.refresh() } }
  timer?.tolerance=min(30,delay*0.1)
  }
+ /// Sleep: stop polling but keep the account and its last reading.
+ func pause() { generation += 1;timer?.invalidate();timer=nil;loading=false }
+ /// Wake: refresh now if still connected.
+ func resume() { guard enabled else { return };generation += 1;timer?.invalidate();timer=nil;loading=false;Task { await refresh() } }
  func disconnect() { enabled=false;generation += 1;timer?.invalidate();timer=nil;loading=false;stale=snapshot != nil;if !stale { snapshot=nil;error=nil } }
  func refresh() async {
  guard enabled,!loading else { return };loading=true;defer{loading=false;if enabled { scheduleNext() }};let g=generation

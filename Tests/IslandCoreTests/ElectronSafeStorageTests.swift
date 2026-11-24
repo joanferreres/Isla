@@ -42,4 +42,12 @@ final class ElectronSafeStorageTests:XCTestCase {
   var blob=Data("v10".utf8);blob.append(cipher.prefix(moved))
   XCTAssertEqual(try ElectronSafeStorage.chromeCookieValue(blob,password:password),"sk-ant-sid-fixture")
  }
+ func testCookieTextKeepsUnprefixedSessionIntact() throws {
+  let session="sk-ant-sid01-abcdefghijklmnopqrstuvwxyz0123456789-ABCDEFGH"
+  XCTAssertEqual(try ElectronSafeStorage.cookieText(Data(session.utf8)),session)
+ }
+ func testCookieTextDropsBinaryHostHash() throws {
+  let hash=Data((0..<32).map { UInt8(($0 * 37 + 1) % 256) | 0x80 })
+  XCTAssertEqual(try ElectronSafeStorage.cookieText(hash+Data("org-fixture".utf8)),"org-fixture")
+ }
 }
