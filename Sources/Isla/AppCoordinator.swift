@@ -172,6 +172,7 @@ import IslandCore
   for url in urls where url.scheme == "isla" {
    switch url.host?.lowercased() {
    case "tocadiscos": openRecordPlayer()
+   case "alert","aviso": activity.previewNotification(source:AlertSource(rawValue:url.lastPathComponent.lowercased()) ?? .codex)
    case "ajustes","settings": showSettings(page: SettingsPage.from(query: url.query))
    case "isla","open",.none: openIsland()
    default: break

@@ -3,12 +3,12 @@ import Foundation
 public enum AlertSource:String,Codable,CaseIterable,Sendable {
  case codex,claude,cursor,antigravity
  public var title:String { switch self { case .codex:return "Codex";case .claude:return "Claude";case .cursor:return "Cursor";case .antigravity:return "Antigravity" } }
- /// Brand-like RGB (0…1): OpenAI green, Claude orange, Cursor white, Antigravity blue.
+ /// Brand-like RGB (0…1): OpenAI green, Claude orange, Cursor purple, Antigravity blue.
  public var rgb:(r:Double,g:Double,b:Double) {
  switch self {
  case .codex:return (0.06,0.78,0.55)
  case .claude:return (0.85,0.47,0.34)
- case .cursor:return (0.93,0.94,1.0)
+ case .cursor:return (0.62,0.18,1.0)
  case .antigravity:return (0.25,0.55,1.0)
  }
  }

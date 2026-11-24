@@ -161,8 +161,8 @@ enum SettingsPage:String,CaseIterable,Identifiable {
  ForEach(AINotificationMode.allCases,id:\.self) { mode in Text(mode.title).tag(mode) }
  }
  Text("El botón junto a la chincheta alterna entre sonido y borde, solo borde o ningún aviso. La elección se guarda automáticamente.").font(.caption).foregroundStyle(.secondary)
- HStack { Text("Probar aviso");Spacer();ForEach(AlertSource.allCases,id:\.self) { source in Text(source.title).font(.body).padding(.horizontal,14).padding(.vertical,6).background(.quaternary,in:Capsule()).opacity(store.value.aiVisualEnabled ? 1 : 0.4).contentShape(Capsule()).onTapGesture { if store.value.aiVisualEnabled { activity.previewNotification(source:source) } }.accessibilityElement(children:.ignore).accessibilityLabel("Probar aviso de \(source.title)").accessibilityAddTraits(.isButton) } }
- Text("El borde de color resalta la isla al terminar y se desvanece: verde para Codex, naranja para Claude y blanco para Cursor. Sin avisos también oculta el mensaje de finalización.").font(.caption).foregroundStyle(.secondary)
+ HStack { Text("Probar aviso");Spacer();AlertTestButtons(enabled:store.value.aiVisualEnabled) { activity.previewNotification(source:$0) } }
+ Text("El borde de color resalta la isla al terminar y se desvanece: verde para Codex, naranja para Claude, morado para Cursor y azul para Antigravity. Sin avisos también oculta el mensaje de finalización.").font(.caption).foregroundStyle(.secondary)
  Text("Ocultar Codex de Inicio conserva sus avisos y estadísticas si sigue conectado.").font(.caption).foregroundStyle(.secondary)
  } header: { Label("Avisos",systemImage:"bell") }
  }
@@ -213,5 +213,34 @@ enum SettingsPage:String,CaseIterable,Identifiable {
  store.value.selectedCalendarIDs=ids.isEmpty ? ["__none__"] : ids
  calendar.refresh()
  })
+ }
+}
+
+/// Real AppKit buttons: SwiftUI buttons in the same Form row were merged into one control, so every press
+/// fired all four alerts (or only the first). Each NSButton here has its own target and fires on its own.
+struct AlertTestButtons:NSViewRepresentable {
+ let enabled:Bool
+ let fire:(AlertSource) -> Void
+ func makeCoordinator() -> Coordinator { Coordinator() }
+ func makeNSView(context:Context) -> NSStackView {
+  let stack=NSStackView();stack.orientation = .horizontal;stack.spacing=8
+  for (index,source) in AlertSource.allCases.enumerated() {
+   let button=NSButton(title:source.title,target:context.coordinator,action:#selector(Coordinator.pressed(_:)))
+   button.bezelStyle = .rounded;button.tag=index;button.setAccessibilityLabel("Probar aviso de \(source.title)")
+   stack.addArrangedSubview(button)
+  }
+  return stack
+ }
+ func updateNSView(_ stack:NSStackView,context:Context) {
+  context.coordinator.fire=fire
+  for case let button as NSButton in stack.arrangedSubviews { button.isEnabled=enabled }
+ }
+ @MainActor final class Coordinator:NSObject {
+  var fire:(AlertSource) -> Void = { _ in }
+  @objc func pressed(_ sender:NSButton) {
+   let all=AlertSource.allCases
+   guard all.indices.contains(sender.tag) else { return }
+   fire(all[sender.tag])
+  }
  }
 }

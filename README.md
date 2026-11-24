@@ -143,7 +143,7 @@ Sustitución manual: sal de Isla → descarga el ZIP → reemplaza la app en Apl
 
 ## Versión actual
 
-**Isla 0.8.84**.
+**Isla 0.8.85**.
 
 Artefactos de release esperados: `Isla.zip` + `SHA256SUMS.txt`. Firma: identidad personal `Isla Personal Code Signing` (Team ID vacío; **sin notarización**). Gatekeeper puede pedir «Abrir igualmente».
 

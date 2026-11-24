@@ -58,17 +58,22 @@ import IslandCore
  let tint=Color(red:source.rgb.r,green:source.rgb.g,blue:source.rgb.b)
  let contour=CompletionContour(physicalNotch:physicalNotch,cornerRadius:cornerRadius)
  ZStack {
- CompletionBacking(container:container,outlineFrame:frame,physicalNotch:physicalNotch,cornerRadius:cornerRadius).fill(.black,style:FillStyle(eoFill:true))
- // Soft halo, solid base line, then two bright sweeps on top.
- contour.stroke(tint.opacity(0.55),style:StrokeStyle(lineWidth:12,lineCap:.round)).blur(radius:7)
- contour.stroke(tint,style:StrokeStyle(lineWidth:6,lineCap:.round))
- .shadow(color:tint,radius:5)
+ // Static layers are rasterised once on the GPU; only the sweep is re-drawn while it turns.
+ // (A live blur + shadows on the main thread made the whole app, Settings included, stutter.)
+ // The canvas is a little larger than the outline so the glow is not clipped.
+ ZStack {
+ CompletionBacking(container:container,outlineFrame:frame,physicalNotch:physicalNotch,cornerRadius:cornerRadius).fill(.black,style:FillStyle(eoFill:true)).frame(width:frame.width,height:frame.height)
+ contour.stroke(tint.opacity(0.16),style:StrokeStyle(lineWidth:18,lineCap:.round)).frame(width:frame.width,height:frame.height)
+ contour.stroke(tint.opacity(0.30),style:StrokeStyle(lineWidth:11,lineCap:.round)).frame(width:frame.width,height:frame.height)
+ contour.stroke(tint,style:StrokeStyle(lineWidth:6,lineCap:.round)).frame(width:frame.width,height:frame.height)
+ }.frame(width:frame.width+48,height:frame.height+48).drawingGroup()
+ ZStack {
  AngularGradient(colors:[.clear,.clear,tint,.white,tint,.clear],center:.center)
  .scaleEffect(1.5)
  .rotationEffect(.degrees(phase*720))
- .mask(contour.stroke(style:StrokeStyle(lineWidth:6,lineCap:.round)))
- .shadow(color:tint,radius:8)
- .shadow(color:.white.opacity(0.6),radius:3)
+ .mask(contour.stroke(style:StrokeStyle(lineWidth:7,lineCap:.round)))
+ .frame(width:frame.width,height:frame.height)
+ }.frame(width:frame.width+48,height:frame.height+48).drawingGroup()
  }.frame(width:frame.width,height:frame.height)
  .opacity(opacity)
  .task {

@@ -23,7 +23,7 @@ import IslandCore
  var completionHighlightEnabled=true
  var completionNoticeEnabled=true
  private let playSound:() -> Void
- init(playSound:@escaping () -> Void={NSSound(named:"Glass")?.play()}) { self.playSound=playSound }
+ init(playSound:@escaping () -> Void={(NSSound(named:"Glass")?.copy() as? NSSound)?.play()}) { self.playSound=playSound }
  func previewNotification(source:AlertSource = .codex) {
  completionSource=source
  if completionHighlightEnabled { completionPulse=UUID() }
