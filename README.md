@@ -14,7 +14,7 @@ Isla convierte el notch del Mac en un espacio compacto para música, calendario,
 
 <p>
 <img src="docs/media/feature-turntable.png" width="360" alt="Tocadiscos de Isla">
-<img src="docs/media/feature-settings.png" width="280" alt="Ajustes: interruptores de funciones y EQ con IA">
+<img src="docs/media/feature-settings.png" width="280" alt="Ajustes: interruptores de funciones y EQ Adaptative">
 </p>
 
 <p>
@@ -38,16 +38,16 @@ Isla convierte el notch del Mac en un espacio compacto para música, calendario,
 - Tocadiscos a ventana completa: vinilo animado, brazo, ondas y ambientes <kbd>⌘0</kbd>–<kbd>⌘9</kbd>.
 - **Selector de discos** en el borde izquierdo: gira con el trackpad, abanico al pasar el cursor, clic en un disco para cargarlo.
 - Mesa DJ: volumen, Graves / Medios / Agudos, presets de fábrica de Música.
-- Estilo **Claude**: auto-EQ según el tipo de música (Claude o ChatGPT).
+- Estilo **Adaptative**: EQ automático que analiza el audio en tu Mac (sin IA ni API) y ajusta graves, medios y agudos en cada canción.
 - Widget nativo y tocadiscos compacto en el escritorio para ambas fuentes.
-- Spotify tiene los mandos Graves/Medios/Agudos y el EQ con IA (vía Accesibilidad). Sus playlists, la cola, «añadir a playlist» y el selector de discos usan la API web de Spotify: ver [Conectar Spotify](#conectar-spotify-playlists-y-selector-de-discos).
+- Spotify tiene los mandos Graves/Medios/Agudos y el mismo EQ Adaptative. Sus playlists, la cola, «añadir a playlist» y el selector de discos usan la API web de Spotify: ver [Conectar Spotify](#conectar-spotify-playlists-y-selector-de-discos).
 
-### EQ con IA y toggles de funciones
+### EQ Adaptative y toggles de funciones
 
-- En **Ajustes → Módulos → Funciones**: música con fuente automática / Apple Music / Spotify, **EQ con IA**, Calendario, bandeja de archivos, tocadiscos en el escritorio y efecto de tapa.
-- En el tocadiscos, el menú de estilo incluye **Claude** (respeta el interruptor de EQ con IA).
-- El EQ con IA detecta la salida (AirPods, auriculares o altavoces del Mac) y adapta la curva al cambiar de dispositivo.
-- API keys de **Claude** y **ChatGPT** en el llavero (orden: key Claude → key ChatGPT; también `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`). El EQ no usa la sesión OAuth de Claude Code.
+- En **Ajustes → Módulos → Funciones**: música con fuente automática / Apple Music / Spotify, **EQ Adaptative**, Calendario, bandeja de archivos, tocadiscos en el escritorio y efecto de tapa.
+- En el tocadiscos, el menú de estilo incluye **Adaptative** (respeta el interruptor de EQ Adaptative) y, en Apple Music, sus presets.
+- Detecta la salida (AirPods, auriculares o altavoces del Mac) y adapta la curva al cambiar de dispositivo.
+- Isla procesa el sonido ella misma (captura el audio de la app y lo reproduce ecualizado), así que no toca los Ajustes de Spotify ni necesita Accesibilidad para el EQ. La primera vez macOS pide permiso de **captura de audio**.
 
 ### Calendario, IA, archivos y tapa
 
@@ -99,23 +99,23 @@ Más detalle en [docs/INSTALACION.md](docs/INSTALACION.md#primer-aviso-de-macos)
 ### 3. Abrir la isla y activar módulos
 
 - **Haz clic dentro del notch** para abrirla (pasar el puntero no la abre). El menú de la barra o la rueda ⚙︎ llevan a **Ajustes**.
-- En **Ajustes → Módulos** activa solo lo que vayas a usar: Música, Calendario, bandeja de archivos, EQ con IA…
+- En **Ajustes → Módulos** activa solo lo que vayas a usar: Música, Calendario, bandeja de archivos, EQ Adaptative…
 
 ### 4. Conectar cada función (opcional, en este orden)
 
 | Quiero… | Qué hacer |
 | --- | --- |
 | **Música** | Ajustes → Módulos → Música: elige Automática, Apple Music o Spotify y reproduce una canción. Acepta el aviso de **Automatización** (o actívalo en Privacidad y seguridad → Automatización → Isla → Music/Spotify). |
-| **EQ / tocadiscos** | Abre el tocadiscos y gira un mando. Si macOS pide **Accesibilidad**, actívala para Isla y vuelve a girarlo. |
+| **EQ / tocadiscos** | Activa **EQ Adaptative** en Ajustes y acepta el permiso de captura de audio. Los presets de Apple Music sí piden Accesibilidad. |
 | **Calendario** | Activa Calendario y concede el permiso de **Calendarios**. Isla solo lee. |
 | **Consumo de IA (Codex, Cursor, Claude)** | Ver la sección siguiente. |
-| **EQ con IA** | Pega una API key de Claude (`sk-ant-…`) o de ChatGPT en Ajustes → Música, o define `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` en tu shell. No sirve la sesión de un plan de Claude. |
+| **EQ Adaptative** | No necesita API keys. Si no suena nada, revisa Privacidad y seguridad → captura de audio. |
 | **Archivos / AirDrop** | Arrastra archivos desde Finder al notch. No requiere permisos. |
 | **Efecto de tapa** | Actívalo y concede **Grabación de pantalla** (solo para el efecto; no guarda vídeo). |
 
 ### Conectar Spotify (playlists y selector de discos)
 
-Los mandos, el EQ y el EQ con IA de Spotify funcionan sin más. Para **playlists, añadir a playlist, cola y selector de discos** Spotify exige una app propia (gratis, 2 minutos, requiere **Spotify Premium**). No es un fallo de Isla: en modo desarrollo Spotify solo admite unos pocos usuarios por app, así que cada persona crea la suya.
+Los mandos, y el EQ Adaptative de Spotify funcionan sin más. Para **playlists, añadir a playlist, cola y selector de discos** Spotify exige una app propia (gratis, 2 minutos, requiere **Spotify Premium**). No es un fallo de Isla: en modo desarrollo Spotify solo admite unos pocos usuarios por app, así que cada persona crea la suya.
 
 1. Abre [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard), inicia sesión y pulsa **Create app**.
 2. En **Redirect URI** pega `http://127.0.0.1:43821/callback`, marca **Web API** y guarda.

@@ -10,6 +10,8 @@ import IslandCore
     @Published private(set) var gains: [MixerBand: Double] = Dictionary(uniqueKeysWithValues: MixerBand.allCases.map { ($0, 0.0) })
     @Published private(set) var status: String?
     @Published private(set) var running = false
+    /// Mirrors the "EQ Adaptative" preference so views outside the mixer can show it.
+    @Published private(set) var adaptive = false
 
     private let engine = AdaptiveEQEngine()
     private let outputMonitor = MusicAudioOutputMonitor()
@@ -79,6 +81,7 @@ import IslandCore
         guard let preferences, let music else { return }
         let value = preferences.value
         let adaptive = value.musicClaudeEQEnabled
+        if self.adaptive != adaptive { self.adaptive = adaptive }
         let manualActive = manual.values.contains { $0 != 0 }
         guard value.musicEnabled, let snapshot = music.state.snapshot, adaptive || manualActive else {
             stopEngine()

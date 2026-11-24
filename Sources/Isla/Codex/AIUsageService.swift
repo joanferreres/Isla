@@ -108,7 +108,8 @@ actor AICredentialReader {
             var add = query
             add[kSecValueData] = data
             add[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlock
-            SecItemAdd(add as CFDictionary, nil)
+            let added = SecItemAdd(add as CFDictionary, nil)
+            if added != errSecSuccess { NSLog("Isla: could not cache %@ (OSStatus %d)", service, Int(added)) }
         }
     }
 
@@ -647,7 +648,11 @@ actor AICredentialReader {
         }
         do {
             // Cursor may need one keychain prompt for «Cursor Safe Storage»; Claude may need «Claude Code-credentials».
-            let mayAsk = interactive
+            // First time ever (no cached key yet) ask once on our own, so the user does not have to find the button.
+            let promptKey = "aiKeychainAutoPrompted.\(provider.rawValue)"
+            let autoPrompt = !interactive && !UserDefaults.standard.bool(forKey: promptKey)
+            if autoPrompt { UserDefaults.standard.set(true, forKey: promptKey) }
+            let mayAsk = interactive || autoPrompt
             if mayAsk, provider == .claude {
                 accessRequested = true
                 UserDefaults.standard.set(true, forKey: "claudeAccessRequested")

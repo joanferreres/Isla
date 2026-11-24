@@ -23,12 +23,16 @@ import IslandCore
  ZStack {
  if visible && enabled {
  CompletionBacking(container:proxy.size,outlineFrame:frame,physicalNotch:physicalNotch,cornerRadius:cornerRadius).fill(.black,style:FillStyle(eoFill:true))
- contour.stroke(tint.opacity(0.95),style:StrokeStyle(lineWidth:4,lineCap:.round))
- AngularGradient(colors:[.clear,.clear,tint,.white.opacity(0.85),tint,.clear],center:.center)
+ // Soft halo, solid base line, then two bright sweeps on top.
+ contour.stroke(tint.opacity(0.55),style:StrokeStyle(lineWidth:12,lineCap:.round)).blur(radius:7)
+ contour.stroke(tint,style:StrokeStyle(lineWidth:6,lineCap:.round))
+ .shadow(color:tint,radius:5)
+ AngularGradient(colors:[.clear,.clear,tint,.white,tint,.clear],center:.center)
  .scaleEffect(1.5)
- .rotationEffect(.degrees(phase*360))
- .mask(contour.stroke(style:StrokeStyle(lineWidth:4,lineCap:.round)))
- .shadow(color:tint.opacity(0.85),radius:6)
+ .rotationEffect(.degrees(phase*720))
+ .mask(contour.stroke(style:StrokeStyle(lineWidth:6,lineCap:.round)))
+ .shadow(color:tint,radius:8)
+ .shadow(color:.white.opacity(0.6),radius:3)
  }
  }.frame(width:frame.width,height:frame.height)
  .position(x:frame.midX,y:frame.midY)
@@ -44,12 +48,12 @@ import IslandCore
  animationTask=Task { @MainActor in
  // Let the fresh contour enter the hierarchy before animating its properties.
  await Task.yield();guard !Task.isCancelled else { return }
- withAnimation(.easeOut(duration:0.15)) { opacity=1 }
- if !reduceMotion { withAnimation(.linear(duration:1.4)) { phase=1 } }
- do { try await Task.sleep(for:.seconds(1.35)) } catch { return }
+ withAnimation(.easeOut(duration:0.2)) { opacity=1 }
+ if !reduceMotion { withAnimation(.linear(duration:3.0)) { phase=1 } }
+ do { try await Task.sleep(for:.seconds(3.0)) } catch { return }
  guard !Task.isCancelled else { return }
- withAnimation(.easeOut(duration:0.55)) { opacity=0 }
- do { try await Task.sleep(for:.seconds(0.55)) } catch { return }
+ withAnimation(.easeOut(duration:0.7)) { opacity=0 }
+ do { try await Task.sleep(for:.seconds(0.7)) } catch { return }
  guard !Task.isCancelled else { return }
  visible=false;animationTask=nil
  }
